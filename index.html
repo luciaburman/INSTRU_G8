@@ -163,6 +163,15 @@
     animation: banner-in 0.25s ease-out;
   }
   @keyframes banner-in { from { opacity: 0; transform: translateX(-50%) translateY(-8px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+  .verified-banner.error { background: var(--red); color: #fff; }
+  .phase-pill { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 500; padding: 5px 12px; border-radius: 999px; margin-bottom: 14px; background: var(--surface-2); color: var(--text-secondary); }
+  .phase-pill::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); }
+  .phase-running { color: var(--text); }
+  .phase-running::before { background: var(--signal); box-shadow: 0 0 0 4px var(--signal-glow); }
+  .phase-paused, .phase-confirming { background: var(--amber-bg); color: var(--amber); }
+  .phase-paused::before, .phase-confirming::before { background: var(--amber); }
+  .live-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--signal); margin-left: 6px; vertical-align: middle; }
+  button:disabled { opacity: 0.55; cursor: default; }
 </style>
 </head>
 <body>
@@ -202,7 +211,8 @@ const DB = {
     return data || [];
   },
   async addSession(userId, session) {
-    await supa.from('sessions').insert({ user_id: userId, ...session });
+    const { error } = await supa.from('sessions').insert({ user_id: userId, ...session });
+    return { error };
   },
   // Lista para cuando el ESP32 empiece a escribir en emg_readings de verdad.
   subscribeToEMG(userId, onSample) {
@@ -256,14 +266,15 @@ async function boot() {
   }
 }
 
-function showVerifiedBanner() {
-  const banner = el('div', { class: 'verified-banner' }, [
+function showBanner(text, isError) {
+  const banner = el('div', { class: 'verified-banner' + (isError ? ' error' : '') }, [
     el('span', { html: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>` }),
-    el('span', {}, 'Cuenta verificada'),
+    el('span', {}, text),
   ]);
   document.body.appendChild(banner);
   setTimeout(() => banner.remove(), 3500);
 }
+function showVerifiedBanner() { showBanner('Cuenta verificada'); }
 
 /* =========================================================
    GENERADOR DE PLAN — reglas, sin IA externa
@@ -291,18 +302,132 @@ function generarPlan(profile) {
 }
 
 /* =========================================================
-   SIMULADOR DE SEÑAL EMG (reemplazar por Bluetooth/Supabase real)
+   FUENTE DE SEÑAL EMG
+   -----------------------------------------------------------
+   Hoy genera una señal simulada. Cuando el ESP32 esté mandando datos
+   reales a Supabase, solo hay que reemplazar el contenido de start():
+     const ch = DB.subscribeToEMG(state.user.id, (biceps) => onSample(biceps));
+     return () => supa.removeChannel(ch);
+   El resto de la app no cambia.
    ========================================================= */
-const emgSim = { t: 0, running: false, raf: null };
-function emgTick(dashboardCtx) {
-  if (!emgSim.running) return;
-  emgSim.t += 0.05;
-  const cycle = (Math.sin(emgSim.t * 2 * Math.PI / 2.5) + 1) / 2;
-  let biceps = cycle * (0.92 + Math.random() * 0.08);
-  biceps = Math.min(1, Math.max(0, biceps));
-  dashboardCtx.onSample(biceps);
-  emgSim.raf = setTimeout(() => emgTick(dashboardCtx), 50);
+const emgSource = {
+  simT: -0.625, // arranca con el músculo relajado
+  start(onSample) {
+    const id = setInterval(() => {
+      emgSource.simT += 0.05;
+      const cycle = (Math.sin(emgSource.simT * 2 * Math.PI / 2.5) + 1) / 2;
+      const b = cycle * (0.92 + Math.random() * 0.08);
+      onSample(Math.min(1, Math.max(0, b)));
+    }, 50);
+    return () => clearInterval(id);
+  },
+};
+
+/* =========================================================
+   SESIÓN DE ENTRENAMIENTO
+   phase: idle -> running <-> paused -> confirming -> saving -> (historial)
+   Vive fuera de la pantalla, así que si cambiás de pestaña
+   mientras entrenás no se pierde nada.
+   ========================================================= */
+const training = {
+  phase: 'idle',
+  reps: 0, seconds: 0, fatiga: 0,
+  repState: 'relajado',
+  points: [],
+  startedAt: null,
+  saveError: '',
+  clock: null, stopSource: null,
+  ui: null, // lo completa renderEntrenar mientras la pestaña está visible
+};
+
+const REP_UP = 0.5, REP_DOWN = 0.35;
+
+function fmtTime(s) {
+  const m = String(Math.floor(s / 60)).padStart(2, '0');
+  const ss = String(s % 60).padStart(2, '0');
+  return `${m}:${ss}`;
 }
+
+function trainingStopLoops() {
+  clearInterval(training.clock);
+  training.clock = null;
+  if (training.stopSource) { training.stopSource(); training.stopSource = null; }
+}
+
+function trainingStartLoops() {
+  trainingStopLoops();
+  training.clock = setInterval(() => {
+    training.seconds++;
+    if (training.ui) training.ui.refresh();
+  }, 1000);
+  training.stopSource = emgSource.start(onEmgSample);
+}
+
+function trainingReset() {
+  trainingStopLoops();
+  training.phase = 'idle';
+  training.reps = 0; training.seconds = 0; training.fatiga = 0;
+  training.repState = 'relajado';
+  training.points = [];
+  training.startedAt = null;
+  training.saveError = '';
+  emgSource.simT = -0.625;
+}
+
+function onEmgSample(b) {
+  training.points.push(b);
+  if (training.points.length > 120) training.points.shift();
+
+  if (training.repState === 'relajado' && b > REP_UP) {
+    training.repState = 'contraido';
+  } else if (training.repState === 'contraido' && b < REP_DOWN) {
+    training.repState = 'relajado';
+    training.reps++;
+    training.fatiga = Math.min(100, training.reps * 4); // placeholder hasta tener el modelo de ML
+  }
+  if (training.ui) training.ui.refresh();
+}
+
+function trainingStart() {
+  trainingReset();
+  training.phase = 'running';
+  training.startedAt = new Date().toISOString();
+  trainingStartLoops();
+  render();
+}
+function trainingPause() { training.phase = 'paused'; trainingStopLoops(); render(); }
+function trainingResume() { training.phase = 'running'; trainingStartLoops(); render(); }
+function trainingAskFinish() { trainingStopLoops(); training.phase = 'confirming'; training.saveError = ''; render(); }
+function trainingKeepGoing() { training.phase = 'running'; trainingStartLoops(); render(); }
+function trainingDiscard() { trainingReset(); render(); }
+
+async function trainingSave() {
+  training.phase = 'saving';
+  training.saveError = '';
+  render();
+  const { error } = await DB.addSession(state.user.id, {
+    fecha: training.startedAt,
+    reps: training.reps,
+    duracion: fmtTime(training.seconds),
+    fatiga: training.fatiga,
+  });
+  if (error) {
+    // no perdemos la sesión: queda en pantalla para reintentar
+    training.phase = 'confirming';
+    training.saveError = 'No se pudo guardar: ' + error.message;
+    render();
+    return;
+  }
+  state.sessions = await DB.getSessions(state.user.id);
+  trainingReset();
+  state.tab = 'historial';
+  render();
+  showBanner('Sesión guardada');
+}
+
+window.addEventListener('beforeunload', (e) => {
+  if (training.phase !== 'idle') { e.preventDefault(); e.returnValue = ''; }
+});
 
 /* =========================================================
    HELPERS DE ONDA (hero + dashboard)
@@ -517,6 +642,7 @@ function renderProfile() {
 
 /* ---------- Dashboard ---------- */
 function renderDashboard() {
+  training.ui = null;
   const wrap = el('div', { class: 'screen wide' });
 
   wrap.appendChild(el('div', { class: 'topbar' }, [
@@ -524,7 +650,7 @@ function renderDashboard() {
       el('span', { class: 'status-dot' }),
       el('span', {}, state.user.email),
     ]),
-    el('button', { class: 'logout-link', onclick: async () => { await DB.signOut(); state.user = null; state.screen = 'landing'; render(); } }, 'Cerrar sesión'),
+    el('button', { class: 'logout-link', onclick: async () => { trainingReset(); await DB.signOut(); state.user = null; state.sessions = []; state.screen = 'landing'; render(); } }, 'Cerrar sesión'),
   ]));
 
   const tabs = el('div', { class: 'tabs' }, [
@@ -544,10 +670,11 @@ function renderDashboard() {
 }
 
 function tabButton(key, label) {
+  const live = key === 'entrenar' && training.phase !== 'idle';
   return el('button', {
     class: 'tab-btn' + (state.tab === key ? ' active' : ''),
     onclick: () => { state.tab = key; render(); },
-  }, label);
+  }, live ? [label, el('span', { class: 'live-dot' })] : label);
 }
 
 function renderPlanTab() {
@@ -572,7 +699,7 @@ function renderHistorialTab() {
     return el('div', { class: 'card' }, [el('div', { class: 'empty-state' }, 'Todavía no completaste ninguna sesión. Andá a la pestaña "Entrenar" para arrancar.')]);
   }
   const rows = sessions.map(s => el('div', { class: 'session-row' }, [
-    el('span', { class: 'session-date' }, new Date(s.fecha).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' })),
+    el('span', { class: 'session-date' }, new Date(s.fecha).toLocaleString('es-AR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })),
     el('span', { class: 'session-stats mono' }, `${s.reps} reps · ${s.duracion} · fatiga ${s.fatiga}%`),
   ]));
   return el('div', { class: 'card' }, rows);
@@ -580,134 +707,132 @@ function renderHistorialTab() {
 
 function renderEntrenar() {
   const box = el('div', {});
-  let reps = 0, repState = 'relajado', seconds = 0, fatiga = 0, running = true;
+  training.ui = null;
 
-  const repValue = el('div', { class: 'metric-value mono' }, '0');
-  const timeValue = el('div', { class: 'metric-value mono' }, '00:00');
-  const fatigueValue = el('div', { class: 'metric-value mono' }, '0%');
+  // ---------- Antes de empezar ----------
+  if (training.phase === 'idle') {
+    const plan = generarPlan(state.user.profile);
+    box.appendChild(el('div', { class: 'card' }, [
+      el('h2', { class: 'page-title', style: 'font-size:18px' }, 'Listo para entrenar'),
+      el('p', { class: 'page-sub', style: 'margin-bottom:18px' },
+        `Tu plan: ${plan.series} series de ${plan.repeticiones} repeticiones, con ${plan.descanso} de descanso.`),
+      el('button', { class: 'btn-primary', onclick: trainingStart }, 'Iniciar entrenamiento'),
+    ]));
+    box.appendChild(el('div', { class: 'note' },
+      'Al terminar, la sesión se guarda en tu historial. La señal EMG es simulada hasta que el circuito esté conectado.'));
+    return box;
+  }
+
+  // ---------- Sesión en curso / pausa / confirmación ----------
+  const phaseLabels = { running: 'En curso', paused: 'En pausa', confirming: 'En pausa', saving: 'Guardando...' };
+  box.appendChild(el('div', { class: 'phase-pill phase-' + training.phase }, phaseLabels[training.phase]));
+
+  const repValue = el('div', { class: 'metric-value mono' }, String(training.reps));
+  const timeValue = el('div', { class: 'metric-value mono' }, fmtTime(training.seconds));
+  const fatigueValue = el('div', { class: 'metric-value mono' }, training.fatiga + '%');
   const fatigueBadge = el('span', { class: 'fatigue-badge fatigue-low' }, 'Baja');
 
-  const metricsRow = el('div', { class: 'metrics-row' }, [
+  box.appendChild(el('div', { class: 'metrics-row' }, [
     el('div', { class: 'metric' }, [el('div', { class: 'metric-label' }, 'Repeticiones'), repValue]),
     el('div', { class: 'metric' }, [el('div', { class: 'metric-label' }, 'Tiempo'), timeValue]),
     el('div', { class: 'metric' }, [el('div', { class: 'metric-label' }, 'Fatiga'), fatigueValue]),
-  ]);
+  ]));
 
   const canvas = el('canvas', { style: 'width:100%; height:140px; display:block;' });
-  const waveCard = el('div', { class: 'card' }, [
+  box.appendChild(el('div', { class: 'card' }, [
     el('div', { style: 'display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;' }, [
       el('span', { style: 'font-size:12px; color:var(--text-muted);' }, 'Envolvente EMG — bíceps (simulado)'),
       fatigueBadge,
     ]),
     canvas,
-  ]);
+  ]));
 
   const barFill = el('div', { class: 'bar-fill', style: 'width:0%' });
-  const activationCard = el('div', { class: 'card' }, [
+  const activationPct = el('span', { class: 'mono' }, '0%');
+  box.appendChild(el('div', { class: 'card' }, [
     el('div', { style: 'display:flex; justify-content:space-between; font-size:13px; margin-bottom:8px; color:var(--text-secondary);' }, [
       el('span', {}, 'Activación instantánea'),
-      el('span', { class: 'mono' }, '0%'),
+      activationPct,
     ]),
     el('div', { class: 'bar-track' }, [barFill]),
-  ]);
-  const activationPct = activationCard.querySelector('span.mono');
+  ]));
 
-  const pauseBtn = el('button', { class: 'btn-secondary', onclick: toggleRun }, 'Pausar');
-  const finishBtn = el('button', { class: 'btn-primary', onclick: finishSession }, 'Finalizar sesión');
-  const controls = el('div', { class: 'controls-row' }, [pauseBtn, finishBtn]);
+  // ---------- Botones según la fase ----------
+  if (training.phase === 'running' || training.phase === 'paused') {
+    const isRunning = training.phase === 'running';
+    box.appendChild(el('div', { class: 'controls-row' }, [
+      el('button', { class: 'btn-secondary', onclick: isRunning ? trainingPause : trainingResume }, isRunning ? 'Pausar' : 'Reanudar'),
+      el('button', { class: 'btn-primary', onclick: trainingAskFinish }, 'Terminar'),
+    ]));
+  } else {
+    const saving = training.phase === 'saving';
+    const empty = training.reps === 0;
+    const keepBtn = el('button', { class: 'btn-secondary', onclick: trainingKeepGoing }, 'Seguir');
+    const saveBtn = el('button', { class: 'btn-primary', onclick: trainingSave },
+      saving ? 'Guardando...' : (training.saveError ? 'Reintentar' : (empty ? 'Guardar igual' : 'Guardar y terminar')));
+    const discardBtn = el('button', { class: 'btn-ghost', onclick: trainingDiscard }, 'Descartar sesión');
+    if (saving) { keepBtn.disabled = true; saveBtn.disabled = true; discardBtn.disabled = true; }
 
-  const noteBox = el('div', { class: 'note', style: 'margin-top:14px' },
-    'Esta señal es simulada. Cuando el circuito y el ESP32 estén listos, este bloque se conecta directo a la lectura real por Bluetooth o WiFi — el resto del dashboard no cambia.');
+    box.appendChild(el('div', { class: 'card' }, [
+      el('div', { style: 'font-size:15px; font-weight:600; margin-bottom:6px' }, '¿Terminar y guardar esta sesión?'),
+      el('p', { class: 'page-sub', style: 'margin:0 0 14px' },
+        empty ? 'Todavía no se registró ninguna repetición.'
+              : `${training.reps} repeticiones en ${fmtTime(training.seconds)}.`),
+      training.saveError ? el('div', { class: 'error-text', style: 'margin:0 0 12px' }, training.saveError) : null,
+      el('div', { class: 'controls-row' }, [keepBtn, saveBtn]),
+      el('div', { style: 'text-align:center; margin-top:8px' }, [discardBtn]),
+    ]));
+  }
 
-  box.appendChild(metricsRow);
-  box.appendChild(waveCard);
-  box.appendChild(activationCard);
-  box.appendChild(controls);
-  box.appendChild(noteBox);
+  box.appendChild(el('div', { class: 'note', style: 'margin-top:14px' },
+    'Esta señal es simulada. Cuando el circuito y el ESP32 estén listos, este bloque se conecta directo a la lectura real — el resto no cambia.'));
 
-  // --- animación de onda + lógica ---
-  const points = [];
+  // ---------- Dibujo y actualización en vivo ----------
   const ctx = canvas.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
   function resizeCanvas() {
     canvas.width = canvas.clientWidth * dpr;
     canvas.height = canvas.clientHeight * dpr;
-    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
-  resizeCanvas();
-
-  const timer = setInterval(() => { if (running) { seconds++; timeValue.textContent = fmtTime(seconds); } }, 1000);
-
-  function onSample(biceps) {
-    points.push(biceps);
-    if (points.length > 120) points.shift();
-    drawWave();
-    activationPct.textContent = Math.round(biceps * 100) + '%';
-    barFill.style.width = (biceps * 100) + '%';
-
-    if (repState === 'relajado' && biceps > 0.5) repState = 'contraido';
-    else if (repState === 'contraido' && biceps < 0.35) {
-      repState = 'relajado';
-      reps++;
-      repValue.textContent = String(reps);
-      fatiga = Math.min(100, reps * 4);
-      fatigueValue.textContent = fatiga + '%';
-      updateFatigueBadge(fatiga);
-    }
-  }
-
-  function updateFatigueBadge(f) {
-    fatigueBadge.className = 'fatigue-badge ' + (f < 35 ? 'fatigue-low' : f < 70 ? 'fatigue-mid' : 'fatigue-high');
-    fatigueBadge.textContent = f < 35 ? 'Baja' : f < 70 ? 'Moderada' : 'Alta';
-  }
-
   function drawWave() {
     const w = canvas.clientWidth, h = canvas.clientHeight;
     ctx.clearRect(0, 0, w, h);
+    const pts = training.points;
+    if (!pts.length) return;
+    const step = w / 119;
     ctx.beginPath();
-    points.forEach((p, i) => {
-      const x = (i / 119) * w;
+    pts.forEach((p, i) => {
+      const x = w - (pts.length - 1 - i) * step;
       const y = h - (p * (h - 16)) - 8;
       i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
     });
-    const color = getComputedStyle(document.documentElement).getPropertyValue('--signal').trim();
-    ctx.strokeStyle = color;
+    ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--signal').trim();
     ctx.lineWidth = 2;
     ctx.stroke();
   }
 
-  function toggleRun() {
-    running = !running;
-    pauseBtn.textContent = running ? 'Pausar' : 'Reanudar';
-    if (running) emgTick({ onSample });
-  }
-
-  async function finishSession() {
-    running = false;
-    clearInterval(timer);
-    emgSim.running = false;
-    await DB.addSession(state.user.id, {
-      fecha: new Date().toISOString(),
-      reps, duracion: fmtTime(seconds), fatiga,
-    });
-    state.sessions = await DB.getSessions(state.user.id);
-    state.tab = 'historial';
-    render();
-  }
-
-  function fmtTime(s) { const m = String(Math.floor(s/60)).padStart(2,'0'); const ss = String(s%60).padStart(2,'0'); return `${m}:${ss}`; }
-
-  requestAnimationFrame(() => { resizeCanvas(); emgSim.running = true; emgTick({ onSample }); });
+  training.ui = {
+    refresh() {
+      repValue.textContent = String(training.reps);
+      timeValue.textContent = fmtTime(training.seconds);
+      fatigueValue.textContent = training.fatiga + '%';
+      const f = training.fatiga;
+      fatigueBadge.className = 'fatigue-badge ' + (f < 35 ? 'fatigue-low' : f < 70 ? 'fatigue-mid' : 'fatigue-high');
+      fatigueBadge.textContent = f < 35 ? 'Baja' : f < 70 ? 'Moderada' : 'Alta';
+      const b = training.points.length ? training.points[training.points.length - 1] : 0;
+      activationPct.textContent = Math.round(b * 100) + '%';
+      barFill.style.width = (b * 100) + '%';
+      drawWave();
+    },
+  };
+  requestAnimationFrame(() => { resizeCanvas(); if (training.ui) training.ui.refresh(); });
 
   return box;
 }
 
 boot();
 
-/* Nota: cuando el ESP32 empiece a escribir en emg_readings de verdad,
-   en renderEntrenar() se reemplaza emgTick(...) por:
-   DB.subscribeToEMG(state.user.id, (biceps, fatiga) => onSample(biceps))
-   sin tocar el resto del dashboard. */
 </script>
 </body>
 </html>
