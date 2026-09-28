@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Curl EMG</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+  :root {
+    --bg: #F4F6F5;
+    --surface: #FFFFFF;
+    --surface-2: #ECEFED;
+    --border: #DADFDC;
+    --text: #10201A;
+    --text-secondary: #55655D;
+    --text-muted: #8B978F;
+    --signal: #0E9B6C;
+    --signal-glow: rgba(14,155,108,0.18);
+    --amber: #B4740E;
+    --amber-bg: #FBEED9;
+    --red: #C13B3B;
+    --red-bg: #FBE4E1;
+    --radius: 14px;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0D1512;
+      --surface: #14201B;
+      --surface-2: #1B2A23;
+      --border: #263831;
+      --text: #EAF3EE;
+      --text-secondary: #9BB0A6;
+      --text-muted: #647A70;
+      --signal: #4ADE9E;
+      --signal-glow: rgba(74,222,158,0.22);
+      --amber: #F5A524;
+      --amber-bg: #2E2413;
+      --red: #F06868;
+      --red-bg: #2E1717;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0D1512;
+    --surface: #14201B;
+    --surface-2: #1B2A23;
+    --border: #263831;
+    --text: #EAF3EE;
+    --text-secondary: #9BB0A6;
+    --text-muted: #647A70;
+    --signal: #4ADE9E;
+    --signal-glow: rgba(74,222,158,0.22);
+    --amber: #F5A524;
+    --amber-bg: #2E2413;
+    --red: #F06868;
+    --red-bg: #2E1717;
+  }
+  html, body { height: 100%; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono { font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
+  #app { min-height: 100%; display: flex; flex-direction: column; }
+  .screen { flex: 1; display: flex; flex-direction: column; width: 100%; max-width: 480px; margin: 0 auto; padding: 28px 20px 40px; }
+  .screen.wide { max-width: 640px; }
+
+  /* ---------- Landing ---------- */
+  .landing { justify-content: space-between; min-height: 100vh; padding-top: env(safe-area-inset-top, 24px); }
+  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .brand-mark { width: 34px; height: 34px; border-radius: 9px; background: var(--signal-glow); display: flex; align-items: center; justify-content: center; }
+  .brand-mark svg { width: 18px; height: 18px; }
+  .brand-name { font-weight: 600; font-size: 15px; letter-spacing: -0.01em; }
+  .hero-wave { width: 100%; height: 140px; margin: 28px 0 8px; }
+  .hero-title { font-size: 34px; line-height: 1.12; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 14px; }
+  .hero-sub { font-size: 15px; line-height: 1.55; color: var(--text-secondary); margin: 0 0 28px; max-width: 40ch; }
+  .cta-row { display: flex; flex-direction: column; gap: 10px; }
+
+  /* ---------- Buttons & inputs ---------- */
+  button { font-family: inherit; cursor: pointer; border: none; }
+  .btn-primary {
+    background: var(--signal); color: #06140E; font-weight: 600; font-size: 15px;
+    padding: 14px 18px; border-radius: 10px; width: 100%;
+  }
+  .btn-secondary {
+    background: transparent; color: var(--text); font-weight: 500; font-size: 15px;
+    padding: 14px 18px; border-radius: 10px; width: 100%; border: 1px solid var(--border);
+  }
+  .btn-ghost { background: none; color: var(--text-secondary); font-size: 14px; padding: 8px; text-decoration: underline; text-underline-offset: 3px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; }
+  .field input, .field select {
+    width: 100%; background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+    padding: 12px 14px; border-radius: 10px; font-size: 15px; font-family: inherit;
+  }
+  .field input:focus, .field select:focus { outline: 2px solid var(--signal); outline-offset: 1px; }
+  .error-text { color: var(--red); font-size: 13px; margin: -6px 0 14px; }
+
+  /* ---------- Auth / Profile ---------- */
+  .back-row { display: flex; align-items: center; gap: 10px; margin-bottom: 24px; }
+  .back-btn { background: none; padding: 6px; color: var(--text-secondary); }
+  .page-title { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 4px; }
+  .page-sub { font-size: 14px; color: var(--text-secondary); margin: 0 0 24px; }
+
+  /* ---------- Dashboard shell ---------- */
+  .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+  .user-chip { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--signal); box-shadow: 0 0 0 4px var(--signal-glow); }
+  .logout-link { font-size: 13px; color: var(--text-secondary); background: none; text-decoration: underline; text-underline-offset: 2px; }
+
+  .tabs { display: flex; gap: 4px; background: var(--surface-2); border-radius: 10px; padding: 3px; margin-bottom: 22px; }
+  .tab-btn { flex: 1; background: none; padding: 9px 4px; border-radius: 8px; font-size: 13px; font-weight: 500; color: var(--text-secondary); }
+  .tab-btn.active { background: var(--surface); color: var(--text); }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin-bottom: 14px; }
+  .metrics-row { display: flex; gap: 10px; margin-bottom: 14px; }
+  .metric { flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; text-align: center; }
+  .metric-label { font-size: 11px; color: var(--text-muted); margin-bottom: 6px; text-transform: none; }
+  .metric-value { font-size: 26px; font-weight: 600; }
+
+  .fatigue-badge { display: inline-block; font-size: 12px; padding: 3px 10px; border-radius: 20px; font-weight: 500; }
+  .fatigue-low { background: var(--surface-2); color: var(--text-secondary); }
+  .fatigue-mid { background: var(--amber-bg); color: var(--amber); }
+  .fatigue-high { background: var(--red-bg); color: var(--red); }
+
+  .bar-track { height: 8px; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
+  .bar-fill { height: 100%; background: var(--signal); border-radius: 4px; transition: width 0.08s linear; }
+
+  .controls-row { display: flex; gap: 10px; margin-top: 4px; }
+  .controls-row button { flex: 1; padding: 13px; border-radius: 10px; font-size: 14px; font-weight: 600; }
+
+  .plan-item { display: flex; justify-content: space-between; align-items: center; padding: 13px 0; border-bottom: 1px solid var(--border); }
+  .plan-item:last-child { border-bottom: none; }
+  .plan-item-label { font-size: 14px; color: var(--text-secondary); }
+  .plan-item-value { font-size: 15px; font-weight: 600; }
+
+  .session-row { display: flex; justify-content: space-between; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--border); }
+  .session-row:last-child { border-bottom: none; }
+  .session-date { font-size: 14px; }
+  .session-stats { font-size: 13px; color: var(--text-secondary); }
+  .empty-state { text-align: center; padding: 40px 10px; color: var(--text-muted); font-size: 14px; }
+
+  .note {
+    font-size: 12px; color: var(--text-muted); background: var(--surface-2);
+    border-radius: 10px; padding: 12px 14px; line-height: 1.5; margin-top: 6px;
+  }
+  a, a:visited { color: inherit; }
+
+  .verified-banner {
+    position: fixed; top: calc(env(safe-area-inset-top, 0px) + 14px); left: 50%; transform: translateX(-50%);
+    background: var(--signal); color: #06140E; font-weight: 600; font-size: 14px;
+    padding: 10px 18px; border-radius: 999px; display: flex; align-items: center; gap: 8px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.18); z-index: 999;
+    animation: banner-in 0.25s ease-out;
+  }
+  @keyframes banner-in { from { opacity: 0; transform: translateX(-50%) translateY(-8px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/* =========================================================
+   CONEXIÓN REAL A SUPABASE
+   ========================================================= */
+const SUPABASE_URL = 'https://lhzcprnlfbvjjswyjafp.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxoemNwcm5sZmJ2ampzd3lqYWZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAzNjg2ODksImV4cCI6MjEwNTk0NDY4OX0.Yud1fajPzlWdYxxrVV-oEL_sLUxjlnIP1T5PdT72l0A';
+const supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const DB = {
+  async signUp(email, password) {
+    return await supa.auth.signUp({ email, password });
+  },
+  async signIn(email, password) {
+    return await supa.auth.signInWithPassword({ email, password });
+  },
+  async signOut() {
+    await supa.auth.signOut();
+  },
+  async getCurrentUser() {
+    const { data } = await supa.auth.getUser();
+    return data.user || null;
+  },
+  async getProfile(userId) {
+    const { data } = await supa.from('profiles').select('*').eq('id', userId).maybeSingle();
+    return data;
+  },
+  async saveProfile(userId, profile) {
+    await supa.from('profiles').upsert({ id: userId, ...profile });
+  },
+  async getSessions(userId) {
+    const { data } = await supa.from('sessions').select('*').eq('user_id', userId).order('fecha', { ascending: false });
+    return data || [];
+  },
+  async addSession(userId, session) {
+    await supa.from('sessions').insert({ user_id: userId, ...session });
+  },
+  // Lista para cuando el ESP32 empiece a escribir en emg_readings de verdad.
+  subscribeToEMG(userId, onSample) {
+    return supa
+      .channel('emg-live-' + userId)
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'emg_readings', filter: `user_id=eq.${userId}` },
+        (payload) => onSample(payload.new.biceps, payload.new.fatiga)
+      )
+      .subscribe();
+  },
+};
+
+/* =========================================================
+   ESTADO GLOBAL
+   ========================================================= */
+const state = {
+  screen: 'landing',   // landing | auth | profile | dashboard
+  authMode: 'login',   // login | signup
+  authError: '',
+  user: null,
+  tab: 'entrenar',      // entrenar | plan | historial
+};
+
+async function boot() {
+  // Supabase redirige acá después de confirmar el mail, agregando datos
+  // en el hash de la URL (#access_token=...&type=signup). Los detectamos
+  // antes de que el cliente los "limpie" automáticamente.
+  const hash = window.location.hash;
+  if (hash.includes('type=signup') || hash.includes('type=email_change') || hash.includes('type=recovery')) {
+    state.justVerified = true;
+  }
+  // limpiamos la URL para que no quede el token visible ni se re-muestre el cartel al refrescar
+  if (state.justVerified) {
+    window.history.replaceState(null, '', window.location.pathname);
+  }
+
+  // getSession() espera a que el cliente termine de procesar la URL, a diferencia de getUser()
+  const { data: { session } } = await supa.auth.getSession();
+  if (session?.user) {
+    const profile = await DB.getProfile(session.user.id);
+    state.user = { id: session.user.id, email: session.user.email, profile: profile || null };
+    state.screen = profile ? 'dashboard' : 'profile';
+    if (profile) state.sessions = await DB.getSessions(session.user.id);
+  }
+  render();
+
+  if (state.justVerified) {
+    showVerifiedBanner();
+    state.justVerified = false;
+  }
+}
+
+function showVerifiedBanner() {
+  const banner = el('div', { class: 'verified-banner' }, [
+    el('span', { html: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>` }),
+    el('span', {}, 'Cuenta verificada'),
+  ]);
+  document.body.appendChild(banner);
+  setTimeout(() => banner.remove(), 3500);
+}
+
+/* =========================================================
+   GENERADOR DE PLAN — reglas, sin IA externa
+   ========================================================= */
+function generarPlan(profile) {
+  const { nivel, objetivo } = profile;
+  const tablas = {
+    hipertrofia: {
+      principiante: { series: 3, repeticiones: '10-12', descanso: '60s', frecuencia: '2x por semana' },
+      intermedio:   { series: 4, repeticiones: '8-10',  descanso: '75s', frecuencia: '3x por semana' },
+      avanzado:     { series: 5, repeticiones: '6-8',   descanso: '90s', frecuencia: '3-4x por semana' },
+    },
+    resistencia: {
+      principiante: { series: 3, repeticiones: '15-18', descanso: '30s', frecuencia: '2x por semana' },
+      intermedio:   { series: 3, repeticiones: '18-22', descanso: '30s', frecuencia: '3x por semana' },
+      avanzado:     { series: 4, repeticiones: '20-25', descanso: '25s', frecuencia: '3-4x por semana' },
+    },
+    fuerza: {
+      principiante: { series: 3, repeticiones: '5-6',  descanso: '120s', frecuencia: '2x por semana' },
+      intermedio:   { series: 4, repeticiones: '4-6',  descanso: '150s', frecuencia: '2-3x por semana' },
+      avanzado:     { series: 5, repeticiones: '3-5',  descanso: '180s', frecuencia: '3x por semana' },
+    },
+  };
+  return (tablas[objetivo] && tablas[objetivo][nivel]) || tablas.hipertrofia.principiante;
+}
+
+/* =========================================================
+   SIMULADOR DE SEÑAL EMG (reemplazar por Bluetooth/Supabase real)
+   ========================================================= */
+const emgSim = { t: 0, running: false, raf: null };
+function emgTick(dashboardCtx) {
+  if (!emgSim.running) return;
+  emgSim.t += 0.05;
+  const cycle = (Math.sin(emgSim.t * 2 * Math.PI / 2.5) + 1) / 2;
+  let biceps = cycle * (0.92 + Math.random() * 0.08);
+  biceps = Math.min(1, Math.max(0, biceps));
+  dashboardCtx.onSample(biceps);
+  emgSim.raf = setTimeout(() => emgTick(dashboardCtx), 50);
+}
+
+/* =========================================================
+   HELPERS DE ONDA (hero + dashboard)
+   ========================================================= */
+function drawHeroWave(canvas) {
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const resize = () => {
+    canvas.width = canvas.clientWidth * dpr;
+    canvas.height = canvas.clientHeight * dpr;
+    ctx.scale(dpr, dpr);
+  };
+  resize();
+  let t = 0;
+  const cssColor = getComputedStyle(document.documentElement).getPropertyValue('--signal').trim();
+  function frame() {
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    ctx.clearRect(0, 0, w, h);
+    ctx.beginPath();
+    for (let x = 0; x <= w; x += 3) {
+      const freq = 0.06;
+      const envelope = (Math.sin((x * 0.01) + t * 0.6) + 1) / 2;
+      const y = h/2 + Math.sin(x * freq + t) * (6 + envelope * 26) * Math.sin(x*0.15+t*2)*0.3 + Math.sin(x*freq*3+t*1.7)*(4+envelope*10);
+      x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = cssColor;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    t += 0.04;
+    canvas._raf = requestAnimationFrame(frame);
+  }
+  frame();
+  return () => cancelAnimationFrame(canvas._raf);
+}
+
+/* =========================================================
+   RENDER
+   ========================================================= */
+function render() {
+  const app = document.getElementById('app');
+  app.innerHTML = '';
+  if (state.screen === 'landing') app.appendChild(renderLanding());
+  else if (state.screen === 'auth') app.appendChild(renderAuth());
+  else if (state.screen === 'profile') app.appendChild(renderProfile());
+  else if (state.screen === 'dashboard') app.appendChild(renderDashboard());
+}
+
+function el(tag, props = {}, children = []) {
+  const e = document.createElement(tag);
+  Object.entries(props).forEach(([k, v]) => {
+    if (k === 'class') e.className = v;
+    else if (k === 'html') e.innerHTML = v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else e.setAttribute(k, v);
+  });
+  (Array.isArray(children) ? children : [children]).forEach(c => {
+    if (c == null) return;
+    e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+  });
+  return e;
+}
+
+/* ---------- Landing ---------- */
+function renderLanding() {
+  const wrap = el('div', { class: 'screen landing' });
+
+  const top = el('div', {}, [
+    el('div', { class: 'brand' }, [
+      el('div', { class: 'brand-mark' }, [
+        el('span', { html: `<svg viewBox="0 0 24 24" fill="none" stroke="var(--signal)" stroke-width="2"><path d="M2 12h4l2-7 4 14 2-7h8"/></svg>` })
+      ]),
+      el('span', { class: 'brand-name' }, 'Curl EMG'),
+    ]),
+  ]);
+
+  const canvas = el('canvas', { class: 'hero-wave' });
+  const mid = el('div', {}, [
+    canvas,
+    el('h1', { class: 'hero-title' }, 'Medí tu bíceps mientras entrenás.'),
+    el('p', { class: 'hero-sub' }, 'Electromiografía en tiempo real, conteo automático de repeticiones y un modelo que te avisa cuándo tu músculo empieza a fatigarse.'),
+  ]);
+
+  const bottom = el('div', { class: 'cta-row' }, [
+    el('button', { class: 'btn-primary', onclick: () => { state.screen = 'auth'; state.authMode = 'signup'; render(); } }, 'Crear cuenta'),
+    el('button', { class: 'btn-secondary', onclick: () => { state.screen = 'auth'; state.authMode = 'login'; render(); } }, 'Ya tengo cuenta'),
+  ]);
+
+  wrap.appendChild(top);
+  wrap.appendChild(mid);
+  wrap.appendChild(bottom);
+  requestAnimationFrame(() => drawHeroWave(canvas));
+  return wrap;
+}
+
+/* ---------- Auth ---------- */
+function renderAuth() {
+  const wrap = el('div', { class: 'screen' });
+  const isSignup = state.authMode === 'signup';
+
+  wrap.appendChild(el('div', { class: 'back-row' }, [
+    el('button', { class: 'back-btn', 'aria-label': 'Volver', onclick: () => { state.screen = 'landing'; render(); }, html: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>` }),
+  ]));
+
+  wrap.appendChild(el('h2', { class: 'page-title' }, isSignup ? 'Creá tu cuenta' : 'Iniciá sesión'));
+  wrap.appendChild(el('p', { class: 'page-sub' }, isSignup ? 'Vas a poder calibrar tu perfil y guardar tu historial de entrenamiento.' : 'Ingresá con tu email y contraseña.'));
+
+  const emailInput = el('input', { type: 'email', autocomplete: 'email', placeholder: 'vos@ejemplo.com' });
+  const passInput = el('input', { type: 'password', autocomplete: isSignup ? 'new-password' : 'current-password', placeholder: '••••••••' });
+
+  const form = el('form', {}, [
+    el('div', { class: 'field' }, [el('label', {}, 'Email'), emailInput]),
+    el('div', { class: 'field' }, [el('label', {}, 'Contraseña'), passInput]),
+  ]);
+
+  const errorBox = el('div', { class: 'error-text' }, state.authError || '');
+  if (!state.authError) errorBox.style.display = 'none';
+
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const email = emailInput.value.trim().toLowerCase();
+    const pass = passInput.value;
+    if (!email || !pass) { state.authError = 'Completá los dos campos.'; render(); return; }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Un momento...';
+
+    if (isSignup) {
+      const { data, error } = await DB.signUp(email, pass);
+      if (error) { state.authError = error.message; render(); return; }
+      if (!data.session) {
+        // El proyecto tiene "Confirm email" activado: hay que confirmar por mail antes de poder entrar.
+        state.authError = '';
+        state.authMode = 'login';
+        state.screen = 'auth';
+        alert('Cuenta creada. Revisá tu email para confirmarla antes de iniciar sesión.');
+        render();
+        return;
+      }
+      state.user = { id: data.user.id, email: data.user.email, profile: null };
+      state.screen = 'profile';
+      render();
+    } else {
+      const { data, error } = await DB.signIn(email, pass);
+      if (error) { state.authError = error.message; render(); return; }
+      const profile = await DB.getProfile(data.user.id);
+      state.user = { id: data.user.id, email: data.user.email, profile };
+      if (profile) state.sessions = await DB.getSessions(data.user.id);
+      state.screen = profile ? 'dashboard' : 'profile';
+      render();
+    }
+  });
+
+  const submitBtn = el('button', { class: 'btn-primary', type: 'submit', style: 'margin-top:6px' }, isSignup ? 'Crear cuenta' : 'Ingresar');
+  form.appendChild(submitBtn);
+
+  wrap.appendChild(form);
+  wrap.appendChild(errorBox);
+  wrap.appendChild(el('button', {
+    class: 'btn-ghost', style: 'margin-top:16px',
+    onclick: () => { state.authMode = isSignup ? 'login' : 'signup'; state.authError=''; render(); }
+  }, isSignup ? '¿Ya tenés cuenta? Iniciá sesión' : '¿No tenés cuenta? Creá una'));
+
+  return wrap;
+}
+
+/* ---------- Profile setup ---------- */
+function renderProfile() {
+  const wrap = el('div', { class: 'screen' });
+  wrap.appendChild(el('h2', { class: 'page-title' }, 'Contanos sobre vos'));
+  wrap.appendChild(el('p', { class: 'page-sub' }, 'Con esto armamos tu plan de entrenamiento y calibramos las métricas.'));
+
+  const peso = el('input', { type: 'number', placeholder: '70', min: '30', max: '250' });
+  const altura = el('input', { type: 'number', placeholder: '175', min: '120', max: '230' });
+  const nivel = el('select', {}, [
+    el('option', { value: 'principiante' }, 'Principiante'),
+    el('option', { value: 'intermedio' }, 'Intermedio'),
+    el('option', { value: 'avanzado' }, 'Avanzado'),
+  ]);
+  const objetivo = el('select', {}, [
+    el('option', { value: 'hipertrofia' }, 'Hipertrofia (ganar masa muscular)'),
+    el('option', { value: 'resistencia' }, 'Resistencia'),
+    el('option', { value: 'fuerza' }, 'Fuerza máxima'),
+  ]);
+
+  const form = el('form', {}, [
+    el('div', { class: 'field' }, [el('label', {}, 'Peso (kg)'), peso]),
+    el('div', { class: 'field' }, [el('label', {}, 'Altura (cm)'), altura]),
+    el('div', { class: 'field' }, [el('label', {}, 'Nivel de entrenamiento'), nivel]),
+    el('div', { class: 'field' }, [el('label', {}, 'Objetivo principal'), objetivo]),
+  ]);
+
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const profile = {
+      peso: Number(peso.value) || 70,
+      altura: Number(altura.value) || 170,
+      nivel: nivel.value,
+      objetivo: objetivo.value,
+    };
+    await DB.saveProfile(state.user.id, profile);
+    state.user.profile = profile;
+    state.sessions = await DB.getSessions(state.user.id);
+    state.screen = 'dashboard';
+    state.tab = 'plan';
+    render();
+  });
+
+  form.appendChild(el('button', { class: 'btn-primary', type: 'submit', style: 'margin-top:6px' }, 'Armar mi plan'));
+  wrap.appendChild(form);
+  return wrap;
+}
+
+/* ---------- Dashboard ---------- */
+function renderDashboard() {
+  const wrap = el('div', { class: 'screen wide' });
+
+  wrap.appendChild(el('div', { class: 'topbar' }, [
+    el('div', { class: 'user-chip' }, [
+      el('span', { class: 'status-dot' }),
+      el('span', {}, state.user.email),
+    ]),
+    el('button', { class: 'logout-link', onclick: async () => { await DB.signOut(); state.user = null; state.screen = 'landing'; render(); } }, 'Cerrar sesión'),
+  ]));
+
+  const tabs = el('div', { class: 'tabs' }, [
+    tabButton('entrenar', 'Entrenar'),
+    tabButton('plan', 'Plan'),
+    tabButton('historial', 'Historial'),
+  ]);
+  wrap.appendChild(tabs);
+
+  const content = el('div', {});
+  if (state.tab === 'entrenar') content.appendChild(renderEntrenar());
+  if (state.tab === 'plan') content.appendChild(renderPlanTab());
+  if (state.tab === 'historial') content.appendChild(renderHistorialTab());
+  wrap.appendChild(content);
+
+  return wrap;
+}
+
+function tabButton(key, label) {
+  return el('button', {
+    class: 'tab-btn' + (state.tab === key ? ' active' : ''),
+    onclick: () => { state.tab = key; render(); },
+  }, label);
+}
+
+function renderPlanTab() {
+  const plan = generarPlan(state.user.profile);
+  const card = el('div', { class: 'card' }, [
+    el('div', { class: 'plan-item' }, [el('span', { class: 'plan-item-label' }, 'Series'), el('span', { class: 'plan-item-value' }, String(plan.series))]),
+    el('div', { class: 'plan-item' }, [el('span', { class: 'plan-item-label' }, 'Repeticiones'), el('span', { class: 'plan-item-value' }, plan.repeticiones)]),
+    el('div', { class: 'plan-item' }, [el('span', { class: 'plan-item-label' }, 'Descanso'), el('span', { class: 'plan-item-value' }, plan.descanso)]),
+    el('div', { class: 'plan-item' }, [el('span', { class: 'plan-item-label' }, 'Frecuencia'), el('span', { class: 'plan-item-value' }, plan.frecuencia)]),
+  ]);
+  const box = el('div', {}, [
+    el('p', { class: 'page-sub', style: 'margin-top:0' }, `Armado para objetivo "${state.user.profile.objetivo}", nivel "${state.user.profile.nivel}".`),
+    card,
+    el('div', { class: 'note' }, 'Este plan se genera con reglas simples a partir de tu perfil — no usa un modelo de IA externo, así que no depende de conexión a ningún servicio de terceros.'),
+  ]);
+  return box;
+}
+
+function renderHistorialTab() {
+  const sessions = state.sessions || [];
+  if (!sessions.length) {
+    return el('div', { class: 'card' }, [el('div', { class: 'empty-state' }, 'Todavía no completaste ninguna sesión. Andá a la pestaña "Entrenar" para arrancar.')]);
+  }
+  const rows = sessions.map(s => el('div', { class: 'session-row' }, [
+    el('span', { class: 'session-date' }, new Date(s.fecha).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' })),
+    el('span', { class: 'session-stats mono' }, `${s.reps} reps · ${s.duracion} · fatiga ${s.fatiga}%`),
+  ]));
+  return el('div', { class: 'card' }, rows);
+}
+
+function renderEntrenar() {
+  const box = el('div', {});
+  let reps = 0, repState = 'relajado', seconds = 0, fatiga = 0, running = true;
+
+  const repValue = el('div', { class: 'metric-value mono' }, '0');
+  const timeValue = el('div', { class: 'metric-value mono' }, '00:00');
+  const fatigueValue = el('div', { class: 'metric-value mono' }, '0%');
+  const fatigueBadge = el('span', { class: 'fatigue-badge fatigue-low' }, 'Baja');
+
+  const metricsRow = el('div', { class: 'metrics-row' }, [
+    el('div', { class: 'metric' }, [el('div', { class: 'metric-label' }, 'Repeticiones'), repValue]),
+    el('div', { class: 'metric' }, [el('div', { class: 'metric-label' }, 'Tiempo'), timeValue]),
+    el('div', { class: 'metric' }, [el('div', { class: 'metric-label' }, 'Fatiga'), fatigueValue]),
+  ]);
+
+  const canvas = el('canvas', { style: 'width:100%; height:140px; display:block;' });
+  const waveCard = el('div', { class: 'card' }, [
+    el('div', { style: 'display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;' }, [
+      el('span', { style: 'font-size:12px; color:var(--text-muted);' }, 'Envolvente EMG — bíceps (simulado)'),
+      fatigueBadge,
+    ]),
+    canvas,
+  ]);
+
+  const barFill = el('div', { class: 'bar-fill', style: 'width:0%' });
+  const activationCard = el('div', { class: 'card' }, [
+    el('div', { style: 'display:flex; justify-content:space-between; font-size:13px; margin-bottom:8px; color:var(--text-secondary);' }, [
+      el('span', {}, 'Activación instantánea'),
+      el('span', { class: 'mono' }, '0%'),
+    ]),
+    el('div', { class: 'bar-track' }, [barFill]),
+  ]);
+  const activationPct = activationCard.querySelector('span.mono');
+
+  const pauseBtn = el('button', { class: 'btn-secondary', onclick: toggleRun }, 'Pausar');
+  const finishBtn = el('button', { class: 'btn-primary', onclick: finishSession }, 'Finalizar sesión');
+  const controls = el('div', { class: 'controls-row' }, [pauseBtn, finishBtn]);
+
+  const noteBox = el('div', { class: 'note', style: 'margin-top:14px' },
+    'Esta señal es simulada. Cuando el circuito y el ESP32 estén listos, este bloque se conecta directo a la lectura real por Bluetooth o WiFi — el resto del dashboard no cambia.');
+
+  box.appendChild(metricsRow);
+  box.appendChild(waveCard);
+  box.appendChild(activationCard);
+  box.appendChild(controls);
+  box.appendChild(noteBox);
+
+  // --- animación de onda + lógica ---
+  const points = [];
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  function resizeCanvas() {
+    canvas.width = canvas.clientWidth * dpr;
+    canvas.height = canvas.clientHeight * dpr;
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  resizeCanvas();
+
+  const timer = setInterval(() => { if (running) { seconds++; timeValue.textContent = fmtTime(seconds); } }, 1000);
+
+  function onSample(biceps) {
+    points.push(biceps);
+    if (points.length > 120) points.shift();
+    drawWave();
+    activationPct.textContent = Math.round(biceps * 100) + '%';
+    barFill.style.width = (biceps * 100) + '%';
+
+    if (repState === 'relajado' && biceps > 0.5) repState = 'contraido';
+    else if (repState === 'contraido' && biceps < 0.35) {
+      repState = 'relajado';
+      reps++;
+      repValue.textContent = String(reps);
+      fatiga = Math.min(100, reps * 4);
+      fatigueValue.textContent = fatiga + '%';
+      updateFatigueBadge(fatiga);
+    }
+  }
+
+  function updateFatigueBadge(f) {
+    fatigueBadge.className = 'fatigue-badge ' + (f < 35 ? 'fatigue-low' : f < 70 ? 'fatigue-mid' : 'fatigue-high');
+    fatigueBadge.textContent = f < 35 ? 'Baja' : f < 70 ? 'Moderada' : 'Alta';
+  }
+
+  function drawWave() {
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    ctx.clearRect(0, 0, w, h);
+    ctx.beginPath();
+    points.forEach((p, i) => {
+      const x = (i / 119) * w;
+      const y = h - (p * (h - 16)) - 8;
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    const color = getComputedStyle(document.documentElement).getPropertyValue('--signal').trim();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  function toggleRun() {
+    running = !running;
+    pauseBtn.textContent = running ? 'Pausar' : 'Reanudar';
+    if (running) emgTick({ onSample });
+  }
+
+  async function finishSession() {
+    running = false;
+    clearInterval(timer);
+    emgSim.running = false;
+    await DB.addSession(state.user.id, {
+      fecha: new Date().toISOString(),
+      reps, duracion: fmtTime(seconds), fatiga,
+    });
+    state.sessions = await DB.getSessions(state.user.id);
+    state.tab = 'historial';
+    render();
+  }
+
+  function fmtTime(s) { const m = String(Math.floor(s/60)).padStart(2,'0'); const ss = String(s%60).padStart(2,'0'); return `${m}:${ss}`; }
+
+  requestAnimationFrame(() => { resizeCanvas(); emgSim.running = true; emgTick({ onSample }); });
+
+  return box;
+}
+
+boot();
+
+/* Nota: cuando el ESP32 empiece a escribir en emg_readings de verdad,
+   en renderEntrenar() se reemplaza emgTick(...) por:
+   DB.subscribeToEMG(state.user.id, (biceps, fatiga) => onSample(biceps))
+   sin tocar el resto del dashboard. */
+</script>
+</body>
+</html>
