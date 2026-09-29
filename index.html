@@ -197,12 +197,15 @@
   .set-progress { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px; margin-bottom: 14px; border-left: 3px solid var(--signal); border-radius: 6px; background: var(--signal-glow); }
   .set-progress strong { color: var(--text); font-family: 'Space Grotesk', sans-serif; font-size: 16px; }
   .set-progress span { color: var(--text-secondary); font-size: 13px; }
-  .rest-progress { min-height: 132px; padding: 20px 24px; align-items: center; background: var(--surface); border: 1px solid var(--border); border-left: 5px solid var(--signal); box-shadow: 0 8px 24px var(--signal-glow); }
-  .rest-copy { display: flex; flex-direction: column; gap: 5px; }
-  .rest-copy .rest-kicker { color: var(--text-secondary); font-size: 11px; font-weight: 700; }
-  .rest-copy strong { color: var(--text); font-family: 'Space Grotesk', sans-serif; font-size: 18px; }
-  .rest-copy .rest-caption { color: var(--text-muted); font-size: 12px; }
-  .rest-progress .rest-timer { color: var(--text); font-family: 'IBM Plex Mono', monospace; font-size: 48px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; }
+  .training-view-resting { min-height: min(62vh, 520px); display: flex; flex-direction: column; justify-content: center; gap: 16px; }
+  .training-view-resting .set-progress { margin: 0; }
+  .rest-progress { min-height: 0; padding: 16px 8px; flex-direction: column; justify-content: center; gap: 18px; text-align: center; background: transparent; border: 0; box-shadow: none; }
+  .rest-copy { display: flex; flex-direction: column; align-items: center; gap: 7px; }
+  .rest-copy .rest-kicker { color: var(--text-secondary); font-size: 12px; font-weight: 700; }
+  .rest-copy strong { color: var(--text); font-family: 'Space Grotesk', sans-serif; font-size: 20px; }
+  .rest-copy .rest-caption { color: var(--text-muted); font-size: 13px; }
+  .rest-progress .rest-timer { color: var(--text); font-family: 'IBM Plex Mono', monospace; font-size: 80px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; }
+  .rest-actions { width: min(100%, 420px); margin: 0 auto; flex-direction: column; gap: 10px; }
   .set-complete-btn { margin: 0 0 10px; }
   .completed-set-list { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
   .completed-set-heading, .completed-set-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
@@ -270,9 +273,10 @@
     .session-stats { overflow-wrap: anywhere; }
     .metric { padding: 14px 10px; }
     .metric-value { font-size: 24px; }
-    .rest-progress { min-height: 112px; padding: 16px; }
-    .rest-copy strong { font-size: 16px; }
-    .rest-progress .rest-timer { font-size: 38px; }
+    .training-view-resting { min-height: 58vh; gap: 12px; }
+    .rest-progress { gap: 14px; }
+    .rest-copy strong { font-size: 18px; }
+    .rest-progress .rest-timer { font-size: 60px; }
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -1000,7 +1004,8 @@ function renderHistorialTab() {
 }
 
 function renderEntrenar() {
-  const box = el('div', { class: 'training-view' });
+  const isResting = training.phase === 'resting';
+  const box = el('div', { class: 'training-view' + (isResting ? ' training-view-resting' : '') });
   training.ui = null;
 
   // ---------- Antes de empezar ----------
@@ -1019,11 +1024,10 @@ function renderEntrenar() {
 
   // ---------- Sesión en curso / pausa / confirmación ----------
   const phaseLabels = { running: 'En curso', paused: 'En pausa', resting: 'Descanso', confirming: 'En pausa', saving: 'Guardando...' };
-  box.appendChild(el('div', { class: 'phase-pill phase-' + training.phase }, phaseLabels[training.phase]));
+  if (!isResting) box.appendChild(el('div', { class: 'phase-pill phase-' + training.phase }, phaseLabels[training.phase]));
 
   const plannedSets = generarPlan(state.user.profile).series;
   const nextSetNumber = training.sets.length + 1;
-  const isResting = training.phase === 'resting';
   const restTimerValue = el('span', { class: 'rest-timer' }, fmtTime(training.restSeconds));
   const isPaused = training.phase === 'paused';
   box.appendChild(isResting
@@ -1039,6 +1043,15 @@ function renderEntrenar() {
         el('strong', {}, `Serie ${nextSetNumber} de ${plannedSets} · ${isPaused ? 'en pausa' : 'en curso'}`),
         el('span', {}, `${training.sets.length} ${training.sets.length === 1 ? 'serie completada' : 'series completadas'}`),
       ]));
+
+    if (isResting) {
+      training.ui = { refresh() { restTimerValue.textContent = fmtTime(training.restSeconds); } };
+      box.appendChild(el('div', { class: 'controls-row rest-actions' }, [
+        el('button', { class: 'btn-primary', onclick: trainingStartNextSet }, `Iniciar serie ${nextSetNumber}`),
+        el('button', { class: 'btn-secondary', onclick: trainingAskFinish }, 'Terminar entrenamiento'),
+      ]));
+      return box;
+    }
 
   const repValue = el('div', { class: 'metric-value mono' }, String(training.reps));
   const timeValue = el('div', { class: 'metric-value mono' }, fmtTime(training.setSeconds));
@@ -1090,11 +1103,6 @@ function renderEntrenar() {
     box.appendChild(completeSetBtn);
     box.appendChild(el('div', { class: 'controls-row' }, [
       el('button', { class: 'btn-secondary', onclick: isRunning ? trainingPause : trainingResume }, isRunning ? 'Pausar' : 'Reanudar'),
-      el('button', { class: 'btn-primary', onclick: trainingAskFinish }, 'Terminar entrenamiento'),
-    ]));
-  } else if (training.phase === 'resting') {
-    box.appendChild(el('div', { class: 'controls-row' }, [
-      el('button', { class: 'btn-secondary', onclick: trainingStartNextSet }, `Empezar serie ${training.sets.length + 1}`),
       el('button', { class: 'btn-primary', onclick: trainingAskFinish }, 'Terminar entrenamiento'),
     ]));
   } else {
