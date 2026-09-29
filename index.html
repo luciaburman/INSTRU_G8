@@ -103,7 +103,10 @@
     padding: 12px 14px; border-radius: 10px; font-size: 15px; font-family: inherit;
   }
   .field input:focus, .field select:focus { outline: 2px solid var(--signal); outline-offset: 1px; }
-  .error-text { color: var(--red); font-size: 13px; margin: -6px 0 14px; }
+  .error-text {
+    color: var(--red); background: var(--red-bg); border: 1px solid var(--red);
+    border-radius: 8px; font-size: 13px; line-height: 1.45; margin: 12px 0 16px; padding: 10px 12px;
+  }
 
   /* ---------- Auth / Profile ---------- */
   .back-row { display: flex; align-items: center; gap: 10px; margin-bottom: 24px; }
@@ -542,7 +545,7 @@ function renderAuth() {
     el('div', { class: 'field' }, [el('label', {}, 'Contraseña'), passInput]),
   ]);
 
-  const errorBox = el('div', { class: 'error-text' }, state.authError || '');
+  const errorBox = el('div', { class: 'error-text', role: 'alert', 'aria-live': 'polite' }, state.authError || '');
   if (!state.authError) errorBox.style.display = 'none';
 
   form.addEventListener('submit', async (ev) => {
@@ -556,7 +559,19 @@ function renderAuth() {
 
     if (isSignup) {
       const { data, error } = await DB.signUp(email, pass);
-      if (error) { state.authError = error.message; render(); return; }
+      if (error) {
+        const accountExists = error.code === 'user_already_exists' || /already (registered|exists)/i.test(error.message || '');
+        state.authError = accountExists
+          ? 'Ya existe una cuenta con ese email. Iniciá sesión con tu cuenta.'
+          : error.message;
+        render();
+        return;
+      }
+      if (data.user?.identities?.length === 0) {
+        state.authError = 'Ya existe una cuenta con ese email. Iniciá sesión con tu cuenta.';
+        render();
+        return;
+      }
       if (!data.session) {
         // El proyecto tiene "Confirm email" activado: hay que confirmar por mail antes de poder entrar.
         state.authError = '';
