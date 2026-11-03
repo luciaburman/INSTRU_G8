@@ -192,6 +192,37 @@
   .phase-paused::before, .phase-confirming::before { background: var(--amber); }
   .live-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--signal); margin-left: 6px; vertical-align: middle; }
   button:disabled { opacity: 0.55; cursor: default; }
+  .phase-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .phase-row .phase-pill { margin-bottom: 0; }
+  .training-view > .phase-row { grid-column: 1 / -1; }
+  .sensor-card { display: flex; flex-direction: column; gap: 8px; }
+  .training-view > .sensor-card { grid-column: 2; align-self: stretch; margin: 0; }
+  .sensor-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .sensor-text { font-size: 13px; line-height: 1.5; color: var(--text-secondary); min-height: 20px; }
+  .sensor-label { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+  .sensor-code { display: flex; gap: 8px; }
+  .sensor-code input { flex: 1; min-width: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; font-family: 'IBM Plex Mono', monospace; text-transform: uppercase; }
+  .sensor-code button { width: auto; padding: 10px 14px; }
+  .sensor-badge { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 500; color: var(--text-secondary); white-space: nowrap; }
+  .sensor-badge::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
+  .sensor-live { color: var(--text); }
+  .sensor-live::before { background: var(--signal); box-shadow: 0 0 0 4px var(--signal-glow); }
+  .sensor-stale { color: var(--red); }
+  .sensor-stale::before { background: var(--red); }
+  .sensor-waiting::before, .sensor-connecting::before { background: var(--amber); }
+  .fatigue-sindatos { opacity: 0.75; }
+  .fatigue-card { display: flex; flex-direction: column; gap: 10px; transition: background 0.4s ease, border-color 0.4s ease; }
+  .fatigue-label { font-size: 13px; color: var(--text-secondary); }
+  .fatigue-title { font-family: 'Space Grotesk', 'DM Sans', sans-serif; font-size: 22px; font-weight: 600; color: var(--text); }
+  .fatigue-text { font-size: 14px; line-height: 1.5; color: var(--text-secondary); }
+  .fatigue-track { height: 14px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+  .fatigue-fill { height: 100%; width: 0; border-radius: 999px; transition: width 0.6s ease, background 0.6s ease; }
+  .fatigue-moderada { background: var(--amber-bg); border-color: var(--amber); }
+  .fatigue-alta { background: var(--red-bg); border-color: var(--red); border-width: 2px; }
+  .fatigue-alta .fatigue-title { color: var(--red); }
+  .fatigue-alta .fatigue-text { color: var(--text); font-weight: 500; }
+  .fatigue-alta .fatigue-title::before { content: ''; display: inline-block; width: 10px; height: 10px; margin-right: 10px; border-radius: 50%; background: var(--red); vertical-align: middle; animation: stop-blink 1s ease-in-out infinite; }
+  @keyframes stop-blink { 50% { opacity: 0.25; } }
   .training-view { min-width: 0; }
   .training-view > .phase-pill { margin-bottom: 12px; }
   .set-progress { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px; margin-bottom: 14px; border-left: 3px solid var(--signal); border-radius: 6px; background: var(--signal-glow); }
@@ -325,16 +356,6 @@ const DB = {
     const { error } = await supa.from('sessions').insert({ user_id: userId, ...session });
     return { error };
   },
-  // Lista para cuando el ESP32 empiece a escribir en emg_readings de verdad.
-  subscribeToEMG(userId, onSample) {
-    return supa
-      .channel('emg-live-' + userId)
-      .on('postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'emg_readings', filter: `user_id=eq.${userId}` },
-        (payload) => onSample(payload.new.biceps, payload.new.fatiga)
-      )
-      .subscribe();
-  },
 };
 
 /* =========================================================
@@ -413,58 +434,119 @@ function generarPlan(profile) {
 }
 
 /* =========================================================
-   FUENTE DE SEÑAL EMG
+   SENSOR (ESP32)
    -----------------------------------------------------------
-   Hoy genera una señal simulada. Cuando el ESP32 esté mandando datos
-   reales a Supabase, solo hay que reemplazar el contenido de start():
-     const ch = DB.subscribeToEMG(state.user.id, (biceps) => onSample(biceps));
-     return () => supa.removeChannel(ch);
-   El resto de la app no cambia.
+   La ESP se conecta por WiFi y hace un POST HTTPS a Supabase Realtime
+   (broadcast) en el canal "curl-emg-<código del sensor>", evento "paquete".
+   La app solo escucha ese canal: no hay tablas ni RLS en el medio.
+
+   Contrato del paquete (v1), lo que manda la ESP:
+     { v: 1, seq, t, serie, reps, estado, fatiga }
+       seq     contador de paquetes (para detectar pérdidas)
+       t       ms desde que arrancó la ESP
+       serie   número de serie que detectó la ESP (sube después de un descanso)
+       reps    repeticiones de esa serie, acumuladas: si se pierde un paquete no se pierde una repetición
+       estado  'calibrando' | 'sin' | 'moderada' | 'alta'
+       fatiga  índice 0-100 (la app no lo muestra; se guarda en el historial)
+   La ESP manda un paquete en cada repetición o cambio de estado, y uno por segundo aunque no pase nada.
    ========================================================= */
-const emgSource = {
-  simT: -0.625, // arranca con el músculo relajado
-  start(onSample) {
-    const id = setInterval(() => {
-      emgSource.simT += 0.05;
-      const cycle = (Math.sin(emgSource.simT * 2 * Math.PI / 2.5) + 1) / 2;
-      const b = cycle * (0.92 + Math.random() * 0.08);
-      onSample(Math.min(1, Math.max(0, b)));
-    }, 50);
-    return () => clearInterval(id);
+const SENSOR_TIMEOUT_MS = 3000;   // sin paquetes durante este tiempo = sensor desconectado
+const FATIGA_UMBRAL = { moderada: 30, alta: 60 };   // los mismos umbrales que usa el firmware
+const ESTADOS = ['calibrando', 'sin', 'moderada', 'alta'];
+
+function readSensorCode() {
+  try { return localStorage.getItem('curl-emg-sensor') || 'G8-01'; } catch { return 'G8-01'; }
+}
+
+const sensor = {
+  code: readSensorCode(),
+  channel: null,
+  subscribed: false,
+  last: null, lastAt: 0,
+  received: 0, lost: 0, invalid: 0,
+  tick: null,
+
+  connect() {
+    this.disconnect();
+    this.channel = supa.channel('curl-emg-' + this.code)
+      .on('broadcast', { event: 'paquete' }, (msg) => this.receive(msg.payload))
+      .subscribe((status) => { this.subscribed = status === 'SUBSCRIBED'; refreshTrainingUi(); });
+    // una vez por segundo, para que la pantalla note si el sensor deja de mandar
+    this.tick = setInterval(refreshTrainingUi, 1000);
+  },
+  disconnect() {
+    if (this.channel) supa.removeChannel(this.channel);
+    clearInterval(this.tick);
+    this.channel = null; this.subscribed = false; this.tick = null;
+    this.last = null; this.lastAt = 0; this.received = 0; this.lost = 0; this.invalid = 0;
+  },
+  setCode(code) {
+    this.code = code.trim().toUpperCase() || 'G8-01';
+    try { localStorage.setItem('curl-emg-sensor', this.code); } catch {}
+    this.connect();
+  },
+  receive(p) {
+    const ok = p && p.v === 1 && Number.isInteger(p.seq) && Number.isInteger(p.serie) && Number.isInteger(p.reps)
+      && p.reps >= 0 && ESTADOS.includes(p.estado) && typeof p.fatiga === 'number';
+    if (!ok) { this.invalid++; return; }
+    // Un paquete viejo que llega tarde (los pedidos HTTPS pueden llegar desordenados) se descarta.
+    // Si seq vuelve muy atrás, la ESP se reinició y se acepta.
+    if (this.last && p.seq <= this.last.seq && this.last.seq - p.seq < 50) return;
+    if (this.last && p.seq > this.last.seq + 1) this.lost += p.seq - this.last.seq - 1;
+    onSensorPacket(p, this.last);
+    this.last = p; this.lastAt = Date.now(); this.received++;
+    refreshTrainingUi();
+  },
+  get status() {
+    if (!this.channel) return 'off';
+    if (!this.subscribed) return 'connecting';
+    if (!this.last) return 'waiting';
+    return Date.now() - this.lastAt > SENSOR_TIMEOUT_MS ? 'stale' : 'live';
   },
 };
 
+function refreshTrainingUi() { if (training.ui) training.ui.refresh(); }
+
 /* =========================================================
    SESIÓN DE ENTRENAMIENTO
-   phase: idle -> running <-> paused -> confirming -> saving -> (historial)
+   phase: idle -> running <-> paused -> resting -> confirming -> saving -> (historial)
    Vive fuera de la pantalla, así que si cambiás de pestaña
    mientras entrenás no se pierde nada.
    ========================================================= */
 const training = {
   phase: 'idle',
-  reps: 0, seconds: 0, setSeconds: 0, fatiga: 0,
+  reps: 0, seconds: 0, setSeconds: 0, fatiga: 0, estado: 'calibrando',
   restSeconds: 0,
   sets: [], saveIndex: 0,
-  repState: 'relajado',
-  points: [],
   startedAt: null,
   saveError: '',
-  clock: null, stopSource: null,
+  clock: null,
   ui: null, // lo completa renderEntrenar mientras la pestaña está visible
 };
 
-const REP_UP = 0.5, REP_DOWN = 0.35;
-
+// La app no muestra el porcentaje de fatiga: solo el estado y un color de verde a rojo.
+function fatigaLabel(f) { return f >= FATIGA_UMBRAL.alta ? 'fatiga alta' : f >= FATIGA_UMBRAL.moderada ? 'fatiga moderada' : 'sin fatiga'; }
+function fatigueColor(level) { return `hsl(${Math.round(95 - 95 * level)}, 70%, 45%)`; }   // 0 = verde, 1 = rojo
 function fmtTime(s) {
   const m = String(Math.floor(s / 60)).padStart(2, '0');
   const ss = String(s % 60).padStart(2, '0');
   return `${m}:${ss}`;
 }
 
+// Las repeticiones se cuentan por diferencia entre paquetes, así:
+// - las que la ESP contó antes de iniciar (o durante una pausa) no se suman;
+// - si la ESP empieza una serie nueva, su contador vuelve a 0 y se sigue sumando bien.
+function onSensorPacket(p, prev) {
+  const delta = !prev ? 0 : p.serie === prev.serie ? Math.max(0, p.reps - prev.reps) : p.reps;
+  if (training.phase !== 'running') return;
+  training.reps += delta;
+  training.estado = p.estado;
+  training.fatiga = Math.max(training.fatiga, Math.round(p.fatiga));
+}
+
 function trainingStopLoops() {
   clearInterval(training.clock);
   training.clock = null;
-  if (training.stopSource) { training.stopSource(); training.stopSource = null; }
 }
 
 function trainingStartLoops() {
@@ -472,40 +554,30 @@ function trainingStartLoops() {
   training.clock = setInterval(() => {
     training.seconds++;
     training.setSeconds++;
-    if (training.ui) training.ui.refresh();
+    refreshTrainingUi();
   }, 1000);
-  training.stopSource = emgSource.start(onEmgSample);
 }
 
 function trainingReset() {
   trainingStopLoops();
   training.phase = 'idle';
-  training.reps = 0; training.seconds = 0; training.setSeconds = 0; training.fatiga = 0;
+  training.reps = 0; training.seconds = 0; training.setSeconds = 0; training.fatiga = 0; training.estado = 'calibrando';
   training.restSeconds = 0;
   training.sets = []; training.saveIndex = 0;
-  training.repState = 'relajado';
-  training.points = [];
   training.startedAt = null;
   training.saveError = '';
-  emgSource.simT = -0.625;
 }
 
-function onEmgSample(b) {
-  training.points.push(b);
-  if (training.points.length > 120) training.points.shift();
-
-  if (training.repState === 'relajado' && b > REP_UP) {
-    training.repState = 'contraido';
-  } else if (training.repState === 'contraido' && b < REP_DOWN) {
-    training.repState = 'relajado';
-    training.reps++;
-    training.fatiga = Math.min(100, training.reps * 4); // placeholder hasta tener el modelo de ML
-  }
-  if (training.ui) training.ui.refresh();
+function trainingStartSetState() {
+  training.reps = 0;
+  training.setSeconds = 0;
+  training.fatiga = 0;
+  training.estado = sensor.last ? sensor.last.estado : 'calibrando';
 }
 
 function trainingStart() {
   trainingReset();
+  trainingStartSetState();
   training.phase = 'running';
   training.startedAt = new Date().toISOString();
   trainingStartLoops();
@@ -516,12 +588,7 @@ function trainingResume() { training.phase = 'running'; trainingStartLoops(); re
 function trainingStoreCurrentSet(force = false) {
   if (!force && !training.reps && !training.setSeconds) return false;
   training.sets.push({ reps: training.reps, duracion: fmtTime(training.setSeconds), fatiga: training.fatiga });
-  training.reps = 0;
-  training.setSeconds = 0;
-  training.fatiga = 0;
-  training.repState = 'relajado';
-  training.points = [];
-  emgSource.simT = -0.625;
+  trainingStartSetState();
   return true;
 }
 function trainingCompleteSet() {
@@ -922,7 +989,7 @@ function renderDashboard() {
         : el('span', { class: 'status-dot' }),
       el('span', {}, state.user.email),
     ]),
-    el('button', { class: 'logout-link', onclick: async () => { trainingReset(); await DB.signOut(); state.user = null; state.sessions = []; state.screen = 'landing'; render(); } }, 'Cerrar sesión'),
+    el('button', { class: 'logout-link', onclick: async () => { trainingReset(); sensor.disconnect(); await DB.signOut(); state.user = null; state.sessions = []; state.screen = 'landing'; render(); } }, 'Cerrar sesión'),
   ]));
 
   const tabs = el('div', { class: 'tabs' }, [
@@ -962,7 +1029,6 @@ function renderPlanTab() {
   const box = el('div', {}, [
     el('p', { class: 'page-sub', style: 'margin-top:0' }, `Armado para objetivo "${state.user.profile.objetivo}", nivel "${state.user.profile.nivel}".`),
     card,
-    el('div', { class: 'note' }, 'Este plan se genera con reglas simples a partir de tu perfil — no usa un modelo de IA externo, así que no depende de conexión a ningún servicio de terceros.'),
   ]);
   return box;
 }
@@ -985,7 +1051,7 @@ function renderHistorialTab() {
       return el('div', { class: 'session-group' }, [
         el('div', { class: 'session-group-heading' }, [
           el('span', { class: 'session-date' }, dateLabel),
-          el('span', { class: 'session-stats mono' }, `${totalReps} reps · ${set.duracion} · fatiga ${set.fatiga}%`),
+          el('span', { class: 'session-stats mono' }, `${totalReps} reps · ${set.duracion} · ${fatigaLabel(set.fatiga)}`),
         ]),
       ]);
     }
@@ -996,7 +1062,7 @@ function renderHistorialTab() {
       ]),
       ...sets.map((set, index) => el('div', { class: 'session-set-row' }, [
         el('span', {}, `Serie ${index + 1}`),
-        el('span', { class: 'mono' }, `${set.reps} reps · ${set.duracion} · fatiga ${set.fatiga}%`),
+        el('span', { class: 'mono' }, `${set.reps} reps · ${set.duracion} · ${fatigaLabel(set.fatiga)}`),
       ])),
     ]);
   });
@@ -1008,23 +1074,53 @@ function renderEntrenar() {
   const box = el('div', { class: 'training-view' + (isResting ? ' training-view-resting' : '') });
   training.ui = null;
 
+  if (!sensor.channel) sensor.connect();
+  const sensorBadge = el('span', { class: 'sensor-badge' }, '');
+  const sensorText = el('span', { class: 'sensor-text' }, '');
+  function refreshSensor() {
+    const st = sensor.status;
+    sensorBadge.className = 'sensor-badge sensor-' + st;
+    sensorBadge.textContent = { off: 'Sensor desconectado', connecting: 'Conectando…', waiting: 'Esperando al sensor', live: 'Sensor en vivo', stale: 'Sin datos del sensor' }[st];
+    sensorText.textContent = {
+      off: '', connecting: '',
+      waiting: `Encendé la ESP con el código ${sensor.code}. Cuando mande el primer dato, aparece acá.`,
+      live: `Recibiendo datos del sensor ${sensor.code}.`,
+      stale: `El sensor ${sensor.code} no manda datos hace ${Math.round((Date.now() - sensor.lastAt) / 1000)} s. Revisá que esté encendido y con WiFi.`,
+    }[st];
+  }
+
   // ---------- Antes de empezar ----------
   if (training.phase === 'idle') {
     const plan = generarPlan(state.user.profile);
+    const codeInput = el('input', { type: 'text', value: sensor.code, maxlength: '20', autocomplete: 'off', 'aria-label': 'Código del sensor' });
+    const codeForm = el('form', { class: 'sensor-code' }, [
+      codeInput,
+      el('button', { class: 'btn-secondary', type: 'submit' }, 'Conectar'),
+    ]);
+    codeForm.addEventListener('submit', (ev) => { ev.preventDefault(); sensor.setCode(codeInput.value); codeInput.value = sensor.code; refreshSensor(); });
     box.appendChild(el('div', { class: 'card training-start-card' }, [
       el('h2', { class: 'page-title', style: 'font-size:18px' }, 'Listo para entrenar'),
       el('p', { class: 'page-sub', style: 'margin-bottom:18px' },
         `Tu plan: ${plan.series} series de ${plan.repeticiones} repeticiones, con ${plan.descanso} de descanso.`),
       el('button', { class: 'btn-primary', onclick: trainingStart }, 'Iniciar entrenamiento'),
     ]));
-    box.appendChild(el('div', { class: 'note training-note start-note' },
-      'Al terminar, la sesión se guarda en tu historial. La señal EMG es simulada hasta que el circuito esté conectado.'));
+    box.appendChild(el('div', { class: 'card sensor-card' }, [
+      el('div', { class: 'sensor-head' }, [el('strong', {}, 'Sensor'), sensorBadge]),
+      sensorText,
+      el('label', { class: 'sensor-label' }, 'Código del sensor'),
+      codeForm,
+    ]));
+    training.ui = { refresh: refreshSensor };
+    refreshSensor();
     return box;
   }
 
   // ---------- Sesión en curso / pausa / confirmación ----------
   const phaseLabels = { running: 'En curso', paused: 'En pausa', resting: 'Descanso', confirming: 'En pausa', saving: 'Guardando...' };
-  if (!isResting) box.appendChild(el('div', { class: 'phase-pill phase-' + training.phase }, phaseLabels[training.phase]));
+  if (!isResting) box.appendChild(el('div', { class: 'phase-row' }, [
+    el('div', { class: 'phase-pill phase-' + training.phase }, phaseLabels[training.phase]),
+    sensorBadge,
+  ]));
 
   const plannedSets = generarPlan(state.user.profile).series;
   const nextSetNumber = training.sets.length + 1;
@@ -1055,34 +1151,26 @@ function renderEntrenar() {
 
   const repValue = el('div', { class: 'metric-value mono' }, String(training.reps));
   const timeValue = el('div', { class: 'metric-value mono' }, fmtTime(training.setSeconds));
-  const fatigueValue = el('div', { class: 'metric-value mono' }, training.fatiga + '%');
-  const fatigueBadge = el('span', { class: 'fatigue-badge fatigue-low' }, 'Baja');
 
   box.appendChild(el('div', { class: 'metrics-row' }, [
     el('div', { class: 'metric' }, [el('div', { class: 'metric-label' }, 'Reps de serie'), repValue]),
     el('div', { class: 'metric' }, [el('div', { class: 'metric-label' }, 'Tiempo de serie'), timeValue]),
-    el('div', { class: 'metric' }, [el('div', { class: 'metric-label' }, 'Fatiga de serie'), fatigueValue]),
   ]));
 
-  const canvas = el('canvas', { class: 'signal-canvas', 'aria-label': 'Señal EMG simulada del bíceps' });
-  box.appendChild(el('div', { class: 'card signal-card' }, [
-    el('div', { class: 'signal-heading' }, [
-      el('strong', {}, 'Señal muscular'),
-      el('span', {}, 'Bíceps · simulada'),
-      fatigueBadge,
-    ]),
-    canvas,
-  ]));
+  // Indicador de fatiga: sin números, solo un color que avanza de verde a rojo y un aviso para frenar.
+  const fatigueFill = el('div', { class: 'fatigue-fill' });
+  const fatigueTitle = el('strong', { class: 'fatigue-title' }, '');
+  const fatigueText = el('span', { class: 'fatigue-text' }, '');
+  const fatigueCard = el('div', { class: 'card signal-card fatigue-card', role: 'status', 'aria-live': 'polite' }, [
+    el('div', { class: 'fatigue-label' }, 'Fatiga del bíceps'),
+    fatigueTitle,
+    el('div', { class: 'fatigue-track' }, [fatigueFill]),
+    fatigueText,
+  ]);
+  box.appendChild(fatigueCard);
 
-  const barFill = el('div', { class: 'bar-fill', style: 'width:0%' });
-  const activationPct = el('span', { class: 'mono' }, '0%');
   box.appendChild(el('div', { class: 'card activation-card' }, [
-    el('div', { class: 'activation-heading' }, [
-      el('span', {}, 'Activación instantánea'),
-      activationPct,
-    ]),
-    el('div', { class: 'bar-track' }, [barFill]),
-    el('div', { class: 'completed-set-list' }, [
+    el('div', { class: 'completed-set-list', style: 'margin-top:0; padding-top:0; border-top:0' }, [
       el('div', { class: 'completed-set-heading' }, [
         el('span', {}, 'Series completadas'),
         el('span', {}, `${training.sets.length}/${plannedSets}`),
@@ -1127,7 +1215,7 @@ function renderEntrenar() {
       training.sets.length ? el('div', { class: 'completed-set-list' }, training.sets.map((set, index) =>
         el('div', { class: 'completed-set-row' }, [
           el('span', {}, `Serie ${index + 1}`),
-          el('span', { class: 'mono' }, `${set.reps} reps · ${set.duracion} · fatiga ${set.fatiga}%`),
+          el('span', { class: 'mono' }, `${set.reps} reps · ${set.duracion} · ${fatigaLabel(set.fatiga)}`),
         ])
       )) : null,
       training.saveError ? el('div', { class: 'error-text', style: 'margin:0 0 12px' }, training.saveError) : null,
@@ -1136,89 +1224,37 @@ function renderEntrenar() {
     ]));
   }
 
-  box.appendChild(el('div', { class: 'note training-note', style: 'margin-top:14px' },
-    'Esta señal es simulada. Cuando el circuito y el ESP32 estén listos, este bloque se conecta directo a la lectura real — el resto no cambia.'));
-
-  // ---------- Dibujo y actualización en vivo ----------
-  const ctx = canvas.getContext('2d');
-  const dpr = window.devicePixelRatio || 1;
-  function resizeCanvas() {
-    canvas.width = canvas.clientWidth * dpr;
-    canvas.height = canvas.clientHeight * dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  }
-  function drawWave() {
-    const w = canvas.clientWidth, h = canvas.clientHeight;
-    ctx.clearRect(0, 0, w, h);
-    ctx.save();
-    ctx.strokeStyle = 'rgba(120, 140, 120, 0.16)';
-    ctx.lineWidth = 1;
-    for (let row = 1; row < 4; row++) {
-      const y = (h / 4) * row;
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(w, y);
-      ctx.stroke();
-    }
-    for (let column = 1; column < 8; column++) {
-      const x = (w / 8) * column;
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, h);
-      ctx.stroke();
-    }
-    const pts = training.points;
-    if (!pts.length) { ctx.restore(); return; }
-    const step = w / 119;
-    ctx.beginPath();
-    pts.forEach((p, i) => {
-      const x = w - (pts.length - 1 - i) * step;
-      const y = h - (p * (h - 16)) - 8;
-      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-    });
-    ctx.lineTo(w, h);
-    ctx.lineTo(w - (pts.length - 1) * step, h);
-    ctx.closePath();
-    const signalRgb = getComputedStyle(document.documentElement).getPropertyValue('--signal-rgb').trim();
-    const fill = ctx.createLinearGradient(0, 0, 0, h);
-    fill.addColorStop(0, `rgba(${signalRgb}, 0.22)`);
-    fill.addColorStop(1, `rgba(${signalRgb}, 0)`);
-    ctx.fillStyle = fill;
-    ctx.fill();
-
-    ctx.beginPath();
-    pts.forEach((p, i) => {
-      const x = w - (pts.length - 1 - i) * step;
-      const y = h - (p * (h - 16)) - 8;
-      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-    });
-    ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--signal').trim();
-    ctx.lineWidth = 2.5;
-    ctx.shadowColor = ctx.strokeStyle;
-    ctx.shadowBlur = 10;
-    ctx.stroke();
-    ctx.restore();
-  }
-
+  // ---------- Actualización en vivo ----------
+  let lastEstado = null;
   training.ui = {
     refresh() {
       repValue.textContent = String(training.reps);
       timeValue.textContent = fmtTime(training.setSeconds);
-      fatigueValue.textContent = training.fatiga + '%';
       restTimerValue.textContent = fmtTime(training.restSeconds);
-      const f = training.fatiga;
-      fatigueBadge.className = 'fatigue-badge ' + (f < 35 ? 'fatigue-low' : f < 70 ? 'fatigue-mid' : 'fatigue-high');
-      fatigueBadge.textContent = f < 35 ? 'Baja' : f < 70 ? 'Moderada' : 'Alta';
-      const b = training.points.length ? training.points[training.points.length - 1] : 0;
-      activationPct.textContent = Math.round(b * 100) + '%';
-      barFill.style.width = (b * 100) + '%';
-      drawWave();
+      refreshSensor();
+      const e = sensor.status === 'live' ? training.estado : 'sindatos';
+      const level = e === 'calibrando' || e === 'sindatos' ? 0 : Math.min(1, training.fatiga / FATIGA_UMBRAL.alta);
+      fatigueFill.style.width = (level ? Math.max(6, level * 100) : 0) + '%';
+      fatigueFill.style.background = fatigueColor(level);
+      if (e === lastEstado) return;
+      if (e === 'alta' && lastEstado !== null && navigator.vibrate) navigator.vibrate([200, 100, 200]);
+      lastEstado = e;
+      fatigueCard.className = 'card signal-card fatigue-card fatigue-' + e;
+      fatigueTitle.textContent = { sindatos: 'Sin datos del sensor', calibrando: 'Calibrando', sin: 'Sin fatiga', moderada: 'La fatiga va en aumento', alta: 'Frená: detectamos fatiga' }[e];
+      fatigueText.textContent = {
+        sindatos: 'La fatiga se va a mostrar cuando lleguen datos de la ESP.',
+        calibrando: 'Hacé las primeras repeticiones con normalidad: con ellas se mide tu punto de partida.',
+        sin: 'Seguí a tu ritmo.',
+        moderada: 'Cuidá la técnica en las próximas repeticiones.',
+        alta: `Terminá la serie ${nextSetNumber} y descansá antes de seguir.`,
+      }[e];
     },
   };
-  requestAnimationFrame(() => { resizeCanvas(); if (training.ui) training.ui.refresh(); });
+  requestAnimationFrame(() => { if (training.ui) training.ui.refresh(); });
 
   return box;
 }
+
 
 boot();
 

@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
+<title>Curl EMG · Procesamiento de la señal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<style>
+  :root { --ink: #1a1a1a; --ink-2: #4a4a4a; --ink-3: #7a7a7a; --rule: #d6d6d6; --paper: #ffffff; --bg: #f4f4f2; }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); }
+  body { margin: 0; color: var(--ink); font-family: 'Source Serif 4', Georgia, serif; font-size: 17px; line-height: 1.6; }
+  .paper { max-width: 820px; margin: 0 auto; background: var(--paper); padding: 56px 64px 72px; box-shadow: 0 0 0 1px var(--rule); }
+  @media (max-width: 700px) { .paper { padding: 32px 16px 48px; } body { font-size: 16px; } }
+
+  header { text-align: center; border-bottom: 1px solid var(--ink); padding-bottom: 22px; margin-bottom: 26px; }
+  header .kicker { font-family: 'Source Sans 3', sans-serif; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 10px; }
+  h1 { font-size: 27px; line-height: 1.25; font-weight: 700; margin: 0 0 10px; }
+  header .authors { font-style: italic; color: var(--ink-2); font-size: 15px; }
+  .abstract { font-size: 15px; color: var(--ink-2); margin: 0 0 8px; }
+  .abstract b { color: var(--ink); }
+
+  h2 { font-size: 19px; font-weight: 700; margin: 38px 0 10px; }
+  h2 .n { margin-right: 10px; }
+  p { margin: 0 0 12px; text-align: justify; hyphens: auto; }
+  .eq { margin: 14px 0 16px; overflow-x: auto; overflow-y: hidden; }
+  .where { font-size: 15px; color: var(--ink-2); }
+
+  figure { margin: 22px 0 26px; }
+  figure canvas, figure svg { width: 100%; display: block; }
+  figcaption { font-size: 14px; color: var(--ink-2); line-height: 1.5; margin-top: 8px; text-align: justify; }
+  figcaption b { color: var(--ink); }
+  .panel-label { font-family: 'Source Sans 3', sans-serif; font-size: 13px; color: var(--ink-2); margin: 10px 0 2px; }
+  .readout { font-family: 'Source Sans 3', sans-serif; font-size: 13px; color: var(--ink-2); text-align: right; margin-bottom: 2px; min-height: 18px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 8px 0 6px; }
+  caption { caption-side: top; text-align: left; font-size: 14px; color: var(--ink-2); padding-bottom: 6px; }
+  caption b { color: var(--ink); }
+  thead th { border-top: 1.5px solid var(--ink); border-bottom: 1px solid var(--ink); font-weight: 600; text-align: left; padding: 6px 8px; }
+  tbody td { padding: 5px 8px; vertical-align: top; }
+  tbody tr:last-child td { border-bottom: 1.5px solid var(--ink); }
+  td.num { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .tablewrap { overflow-x: auto; }
+
+  .sim { position: sticky; top: 0; z-index: 3; background: rgba(255,255,255,0.96); border-bottom: 1px solid var(--rule); margin: 0 -64px 0; padding: 10px 64px; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-family: 'Source Sans 3', sans-serif; font-size: 14px; color: var(--ink-2); }
+  @media (max-width: 700px) { .sim { position: static; margin: 0 -16px; padding: 10px 16px; } }
+  .sim select, .sim button { font: inherit; font-size: 14px; padding: 5px 10px; border: 1px solid var(--ink-3); border-radius: 3px; background: #fff; color: var(--ink); cursor: pointer; }
+  .sim button.main { background: var(--ink); color: #fff; border-color: var(--ink); min-width: 92px; }
+  .sim .out { margin-left: auto; font-variant-numeric: tabular-nums; }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.86em; }
+  pre { font-size: 13px; background: #f7f7f5; border: 1px solid var(--rule); padding: 10px 12px; overflow-x: auto; margin: 10px 0 14px; }
+  .refs { font-size: 14px; color: var(--ink-2); }
+</style>
+</head>
+<body>
+<div class="paper">
+  <header>
+    <div class="kicker">Instrumentación · Grupo 8</div>
+    <h1>Detección de repeticiones y de fatiga muscular en el bíceps a partir de la señal EMG de superficie</h1>
+    <div class="authors">Procesamiento de la señal en la ESP32</div>
+  </header>
+
+  <p class="abstract"><b>Resumen.</b> El sistema mide la actividad eléctrica del bíceps con electrodos de superficie, la acondiciona con un amplificador de instrumentación y filtros, y la digitaliza con el ADC de una ESP32. El firmware estima, en tiempo real, cuántas repeticiones se hicieron y si el músculo muestra signos de fatiga. Para la fatiga combina dos indicadores clásicos: la caída de la frecuencia mediana del espectro (MDF) y el aumento de la amplitud (RMS). Este documento describe cada etapa del procesamiento. Las figuras se generan en vivo a partir de una señal simulada a nivel del ADC, procesada con el mismo algoritmo que el firmware.</p>
+
+  <div class="sim" role="group" aria-label="Simulación">
+    <span>Simulación:</span>
+    <select id="mode" aria-label="Sujeto simulado"></select>
+    <select id="speed" aria-label="Velocidad"><option value="1">tiempo real</option><option value="3">×3</option><option value="6">×6</option></select>
+    <button id="play" class="main">Reproducir</button>
+    <button id="reset">Reiniciar</button>
+    <span class="out" id="out"></span>
+  </div>
+
+  <h2><span class="n">1.</span>Cadena de medición</h2>
+  <p>La señal EMG de superficie del bíceps tiene amplitudes del orden de los cientos de microvolts y contenido espectral útil entre unos 20 Hz y 450 Hz. Para llevarla al rango del ADC se amplifica 250 veces (50 en el INA128 y 5 en la etapa final) y se monta sobre una tensión de referencia, porque el ADC de la ESP32 solo mide tensiones positivas (figura 1).</p>
+  <figure>
+    <svg viewBox="0 0 760 120" role="img" aria-label="Diagrama en bloques de la cadena de medición">
+      <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#1a1a1a"/></marker></defs>
+      <g font-family="Source Sans 3, sans-serif" font-size="13" fill="#1a1a1a" text-anchor="middle">
+        <g fill="none" stroke="#1a1a1a" stroke-width="1.2">
+          <rect x="4" y="30" width="104" height="52"/><rect x="146" y="30" width="118" height="52"/><rect x="302" y="30" width="118" height="52"/>
+          <rect x="458" y="30" width="118" height="52"/><rect x="614" y="30" width="142" height="52"/>
+        </g>
+        <g stroke="#1a1a1a" stroke-width="1.2" marker-end="url(#ar)">
+          <line x1="108" y1="56" x2="144" y2="56"/><line x1="264" y1="56" x2="300" y2="56"/><line x1="420" y1="56" x2="456" y2="56"/><line x1="576" y1="56" x2="612" y2="56"/>
+        </g>
+        <text x="56" y="53">Electrodos</text><text x="56" y="70" font-size="11" fill="#4a4a4a">bíceps</text>
+        <text x="205" y="53">INA128</text><text x="205" y="70" font-size="11" fill="#4a4a4a">G = 50 · REF = V<tspan font-size="8" dy="2">ref</tspan></text>
+        <text x="361" y="53">Filtro Sallen-Key</text><text x="361" y="70" font-size="11" fill="#4a4a4a">G = 5</text>
+        <text x="517" y="53">ADC ESP32</text><text x="517" y="70" font-size="11" fill="#4a4a4a">12 bits · 1 kHz</text>
+        <text x="685" y="53">Firmware</text><text x="685" y="70" font-size="11" fill="#4a4a4a">reps y fatiga → app</text>
+        <text x="380" y="108" font-size="12" fill="#4a4a4a">señal en el ADC: v = V<tspan font-size="9" dy="3">ref</tspan><tspan dy="-3"> + G · v</tspan><tspan font-size="9" dy="3">EMG</tspan><tspan dy="-3">,  con G = 250 y V</tspan><tspan font-size="9" dy="3">ref</tspan><tspan dy="-3"> = 1,85 V</tspan></text>
+      </g>
+    </svg>
+    <figcaption><b>Figura 1.</b> Cadena de medición. La referencia se suma en el pin REF del INA128, así la señal amplificada oscila alrededor de V<sub>ref</sub> y nunca es negativa.</figcaption>
+  </figure>
+
+  <h2><span class="n">2.</span>Adquisición y remoción de la referencia</h2>
+  <p>El ADC entrega una cuenta entera <i>c</i>[<i>n</i>] entre 0 y 4095 cada 1 ms. El firmware la convierte a tensión:</p>
+  <div class="eq" data-tex="v[n] = \frac{c[n]}{2^{12}-1}\, V_{FS}, \qquad V_{FS} = 3{,}3\ \text{V}"></div>
+  <p>La referencia real nunca vale exactamente 1,85 V (tolerancias, temperatura), así que no se resta un valor fijo: se estima con un promedio móvil exponencial, que sigue el nivel de continua pero es demasiado lento para seguir la señal EMG, y se resta:</p>
+  <div class="eq" data-tex="\hat{V}_{ref}[n] = \hat{V}_{ref}[n-1] + \alpha\,\big(v[n] - \hat{V}_{ref}[n-1]\big), \qquad x[n] = v[n] - \hat{V}_{ref}[n]"></div>
+  <p class="where">con α = 1/500, que equivale a una constante de tiempo de 0,5 s (un pasaaltos de primer orden de ≈ 0,3 Hz).</p>
+  <figure>
+    <div class="readout" id="r1"></div>
+    <div class="panel-label">(a) Tensión en el pin del ADC, <i>v</i>[<i>n</i>]</div>
+    <canvas id="c1a" style="height:170px"></canvas>
+    <div class="panel-label">(b) Señal sin la referencia, <i>x</i>[<i>n</i>]</div>
+    <canvas id="c1b" style="height:150px"></canvas>
+    <figcaption><b>Figura 2.</b> Últimos 3 s de señal. (a) La señal oscila alrededor de la referencia (línea punteada: valor estimado por el firmware). (b) Después de restar la referencia queda la señal EMG centrada en cero; las contracciones se ven como aumentos de amplitud.</figcaption>
+  </figure>
+
+  <h2><span class="n">3.</span>Envolvente y conteo de repeticiones</h2>
+  <p>La amplitud de la señal EMG crece con la fuerza que hace el músculo. Para seguirla se calcula el valor eficaz (RMS) en una ventana deslizante de <i>N</i> = 100 muestras (100 ms):</p>
+  <div class="eq" data-tex="\text{RMS}[n] = \sqrt{\frac{1}{N}\sum_{i=0}^{N-1} x^2[n-i]}"></div>
+  <p>El valor absoluto del RMS depende de cada persona y de la colocación de los electrodos, así que no conviene un umbral fijo en volts. Tampoco se pide una calibración: el firmware mide solo dos niveles de referencia mientras se entrena. El <b>nivel de reposo</b> <i>R</i> sigue a los mínimos del RMS: baja enseguida y sube como mucho un 10% por segundo. El <b>pico</b> <i>P</i> sigue a los máximos de las últimas repeticiones y se va olvidando con una constante de tiempo de 10 s. La envolvente se expresa como porcentaje entre esos dos niveles:</p>
+  <div class="eq" data-tex="a[n] = \frac{\text{RMS}[n] - R[n]}{P[n] - R[n]} \qquad (0 = \text{reposo},\ 1 = \text{pico de las últimas repeticiones})"></div>
+  <p class="where">Mientras el pico no supere 3 veces el nivel de reposo, no hubo ninguna contracción real y <i>a</i> se mantiene en 0, para que el ruido no cuente como repetición.</p>
+  <p>Cada repetición de un curl es una contracción seguida de una relajación, es decir, un pico de la envolvente <i>a</i>[<i>n</i>]. Se cuentan con dos umbrales (histéresis): la contracción empieza cuando <i>a</i> supera <i>U</i><sub>sub</sub> = 50% y la repetición se cuenta cuando vuelve a bajar de <i>U</i><sub>baj</sub> = 30%, siempre que haya durado al menos 0,6 s. Con un solo umbral, el ruido alrededor de ese valor contaría repeticiones falsas. Como los umbrales son porcentajes del rango propio de cada persona, funcionan igual con señales grandes o chicas (en la simulación, el conteo es correcto con amplitudes entre 0,3 y 2,5 veces la nominal).</p>
+  <figure>
+    <div class="readout" id="r2"></div>
+    <canvas id="c2" style="height:200px"></canvas>
+    <figcaption><b>Figura 3.</b> Envolvente relativa <i>a</i>[<i>n</i>] en los últimos 10 s (0% = reposo, 100% = pico de las últimas repeticiones). Líneas punteadas: umbrales de subida y de bajada. Cada punto marca una repetición contada.</figcaption>
+  </figure>
+
+  <h2><span class="n">4.</span>Análisis espectral: frecuencia mediana</h2>
+  <p>Con la fatiga, la velocidad de conducción de las fibras musculares baja y el espectro de la señal EMG se corre hacia frecuencias más bajas. Para medirlo, mientras el músculo está contraído (<i>a</i> &gt; 40%) se toma cada 120 ms un bloque de <i>M</i> = 256 muestras, se lo multiplica por una ventana de Hann <i>w</i>[<i>m</i>] y se calcula la FFT:</p>
+  <div class="eq" data-tex="X[k] = \sum_{m=0}^{M-1} x[m]\,w[m]\,e^{-j 2\pi k m / M}, \qquad P[k] = |X[k]|^2, \qquad f_k = k\,\frac{f_s}{M} \approx 3{,}9\,k\ \text{Hz}"></div>
+  <p>Los espectros de todos los bloques de una misma repetición se promedian (método de Welch), normalizando cada uno por su potencia total. De ese espectro promedio se obtienen la frecuencia mediana (MDF), que divide la potencia en dos mitades iguales, y la frecuencia media (MNF), ambas en la banda de 20 a 450 Hz:</p>
+  <div class="eq" data-tex="\sum_{f_k=20}^{\text{MDF}} P[k] = \frac{1}{2}\sum_{f_k=20}^{450} P[k], \qquad \text{MNF} = \frac{\sum f_k\,P[k]}{\sum P[k]}"></div>
+  <figure>
+    <div class="readout" id="r3"></div>
+    <canvas id="c3" style="height:210px"></canvas>
+    <figcaption><b>Figura 4.</b> Espectro de potencia promedio de la repetición en curso, normalizado a su máximo. La línea vertical marca la MDF.</figcaption>
+  </figure>
+
+  <h2><span class="n">5.</span>Tendencia de la MDF a lo largo de la serie</h2>
+  <p>Las primeras tres repeticiones de cada serie definen la línea base. A partir de ahí habría que comparar la MDF de cada repetición con esa base, pero hay un problema de relación señal/ruido. En los datos analizados, la MDF cae alrededor de un 6% al llegar al fallo, y de una repetición a la siguiente varía por azar casi lo mismo (en la simulación, un desvío estándar de ≈ 5%). Una sola repetición no alcanza para decidir.</p>
+  <p>Por eso se ajusta por cuadrados mínimos una recta a la MDF de todas las repeticiones de la serie, <i>i</i> = 0 … <i>n</i>−1, y se mide la caída relativa de esa recta entre la primera repetición y la actual:</p>
+  <div class="eq" data-tex="\text{MDF}_i \approx \beta_0 + \beta_1\, i, \qquad \Delta = -\frac{\beta_1\,(n-1)}{\beta_0}"></div>
+  <p>Como la recta también tiene incertidumbre, solo se considera la parte de la caída que supera su error estándar, y recién desde la sexta repetición:</p>
+  <div class="eq" data-tex="\sigma_\Delta = \frac{(n-1)}{\beta_0}\sqrt{\frac{\sum_i (\text{MDF}_i - \beta_0 - \beta_1 i)^2}{(n-2)\sum_i (i-\bar{i})^2}}, \qquad \Delta^{*} = \max\!\left(0,\ \Delta - \sigma_\Delta\right)"></div>
+  <figure>
+    <div class="readout" id="r4"></div>
+    <canvas id="c4" style="height:220px"></canvas>
+    <figcaption><b>Figura 5.</b> MDF de cada repetición de la serie actual. En gris, las tres repeticiones de la línea base. Recta continua: ajuste por cuadrados mínimos. Punteadas: línea base y caída del 6% (fatiga máxima).</figcaption>
+  </figure>
+
+  <h2><span class="n">6.</span>Índice de fatiga y decisión</h2>
+  <p>El segundo indicador es la amplitud: para mantener la fuerza, el sistema nervioso recluta más unidades motoras y el RMS de cada repetición aumenta. Se compara el RMS medio de las últimas tres repeticiones con el de la línea base. Los dos indicadores se combinan en un índice de 0 a 100, que se suaviza entre repeticiones para que una sola repetición atípica no cambie el estado:</p>
+  <div class="eq" data-tex="I_{\text{rep}} = 100\left[\,0{,}5\,\min\!\left(1, \frac{\Delta^{*}}{0{,}06}\right) + 0{,}5\,\min\!\left(1, \frac{\Delta_{RMS}}{0{,}40}\right)\right]"></div>
+  <div class="eq" data-tex="I_n = 0{,}6\, I_{\text{rep}} + 0{,}4\, I_{n-1}"></div>
+  <p>El estado que recibe la app sale de comparar el índice con dos umbrales: <i>sin fatiga</i> si <i>I</i> &lt; 30, <i>fatiga moderada</i> si 30 ≤ <i>I</i> &lt; 60 y <i>fatiga alta</i> (la app avisa que hay que frenar) si <i>I</i> ≥ 60. Cuando pasan 8 s sin contracciones después de una repetición, el firmware considera que la serie terminó y vuelve a calibrar la línea base.</p>
+  <figure>
+    <div class="readout" id="r5"></div>
+    <canvas id="c5" style="height:200px"></canvas>
+    <figcaption><b>Figura 6.</b> Índice de fatiga después de cada repetición de la serie actual, con las zonas de cada estado.</figcaption>
+  </figure>
+
+  <h2><span class="n">7.</span>Salida hacia la aplicación</h2>
+  <p>La ESP no manda la señal: manda solo el resultado del procesamiento, por WiFi, con un pedido HTTPS a un canal de Supabase Realtime que la app escucha. Envía un paquete con cada repetición o cambio de estado, y uno por segundo aunque no cambie nada, para que la app sepa que el sensor sigue conectado. Las repeticiones se mandan acumuladas, así la pérdida de un paquete no hace perder una repetición.</p>
+  <pre id="packet">{ "v": 1, "seq": 42, "t": 61230, "serie": 1, "reps": 7, "estado": "sin", "fatiga": 18 }</pre>
+
+  <div class="tablewrap">
+  <table>
+    <caption><b>Tabla 1.</b> Parámetros del procesamiento.</caption>
+    <thead><tr><th>Etapa</th><th>Parámetro</th><th>Valor</th></tr></thead>
+    <tbody id="params"></tbody>
+  </table>
+  </div>
+
+  <h2><span class="n">8.</span>Limitaciones</h2>
+  <p>Ni el conteo ni el índice de fatiga necesitan una calibración: el conteo usa niveles que el firmware mide solo desde la primera repetición, y la fatiga compara cada serie con sus propias primeras repeticiones. La caída de la MDF con la fatiga (≈ 6%) es del mismo orden que su variabilidad entre repeticiones, por lo que la detección de fatiga depende de la tendencia a lo largo de varias repeticiones y del aumento del RMS; en series cortas (menos de seis repeticiones) el índice solo usa el RMS. El valor de aumento del RMS al fallo (40%) es una suposición del modelo y debe ajustarse con datos medidos. Las figuras de este documento provienen de una señal simulada: los parámetros del sujeto (amplitud, espectro, ruido de red y de movimiento) están en <code>emg-sim.js</code>.</p>
+</div>
+
+<script src="emg-sim.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const fmt = (x, d = 1) => Number(x).toFixed(d).replace('.', ',');
+
+/* ---------- ecuaciones ---------- */
+document.querySelectorAll('.eq').forEach((e) => katex.render(e.dataset.tex, e, { displayMode: true, throwOnError: false }));
+
+/* ---------- tabla de parámetros (sale de emg-sim.js) ---------- */
+const params = [
+  ['Adquisición', 'Frecuencia de muestreo', HW.fs + ' Hz'],
+  ['Adquisición', 'Resolución / fondo de escala del ADC', `${HW.adcBits} bits / ${fmt(HW.vfs)} V`],
+  ['Adquisición', 'Tensión de referencia', fmt(HW.vref, 2) + ' V'],
+  ['Envolvente', 'Ventana RMS', DSP.rmsWin + ' muestras (' + DSP.rmsWin * 1000 / HW.fs + ' ms)'],
+  ['Repeticiones', 'Umbrales de subida / bajada', `${REP.up * 100}% / ${REP.down * 100}% del rango reposo-pico`],
+  ['Repeticiones', 'Olvido del pico (constante de tiempo)', REP.peakTau + ' s'],
+  ['Repeticiones', 'Subida máxima del nivel de reposo', Math.round(REP.floorRise * 100) + '% por segundo'],
+  ['Repeticiones', 'Pico mínimo para considerar una contracción', REP.minRatio + ' × reposo'],
+  ['Repeticiones', 'Duración mínima de una contracción', fmt(REP.minDur) + ' s'],
+  ['Espectro', 'Largo de la FFT / salto entre bloques', `${DSP.fftN} / ${DSP.hop} muestras`],
+  ['Espectro', 'Banda de análisis', `${DSP.fLo}–${DSP.fHi} Hz`],
+  ['Fatiga', 'Repeticiones de línea base', String(FAT.baseReps)],
+  ['Fatiga', 'Caída de MDF = fatiga máxima', Math.round(FAT.freqDropFull * 100) + '%'],
+  ['Fatiga', 'Aumento de RMS = fatiga máxima', Math.round(FAT.rmsRiseFull * 100) + '%'],
+  ['Fatiga', 'Pesos MDF / RMS', `${FAT.wFreq} / ${FAT.wRMS}`],
+  ['Fatiga', 'Repeticiones mínimas para la recta', String(FAT.trendMinReps)],
+  ['Fatiga', 'Umbrales moderada / alta', `${FAT.moderate} / ${FAT.high}`],
+  ['Series', 'Pausa que cierra una serie', SERIE.restGap + ' s'],
+];
+$('params').innerHTML = params.map(([a, b, c]) => `<tr><td>${a}</td><td>${b}</td><td class="num">${c}</td></tr>`).join('');
+
+/* ---------- simulación ---------- */
+for (const [k, m] of Object.entries(SIM_MODES)) $('mode').appendChild(new Option(m.label, k, false, k === 'rapida'));
+let esp = null, timer = null, last = 0, repHist = [], histSerie = 1, histReps = 0;
+function reset() {
+  stop();
+  const m = SIM_MODES[$('mode').value];
+  esp = new SimulatedEsp({ repsToFailure: m.repsToFailure, rng: makeRng(m.seed) });
+  repHist = []; histSerie = 1; histReps = 0;
+  draw(true);
+}
+function start() {
+  last = performance.now();
+  timer = setInterval(() => {
+    const now = performance.now();
+    let n = Math.floor((now - last) * HW.fs / 1000);
+    if (n < 1) return;
+    last += n * 1000 / HW.fs;
+    const p = esp.advance(Math.min(n * Number($('speed').value), 3000));
+    if (p.serie !== histSerie) { repHist = []; histSerie = p.serie; histReps = 0; }
+    if (p.reps !== histReps) { histReps = p.reps; if (esp.fw.base) repHist.push({ rep: p.reps, score: esp.fw.score }); }
+    draw();
+  }, 20);
+  $('play').textContent = 'Pausar';
+}
+function stop() { clearInterval(timer); timer = null; $('play').textContent = 'Reproducir'; }
+$('play').onclick = () => (timer ? stop() : start());
+$('reset').onclick = reset;
+$('mode').onchange = reset;
+
+/* ---------- gráficos: ejes al estilo de una figura de informe ---------- */
+const INK = '#1a1a1a', INK2 = '#4a4a4a', INK3 = '#9a9a9a', GRID = '#ececec', BLUE = '#1f4e8c', RED = '#b02a2a', ORANGE = '#c25e00';
+const FONT = '12px "Source Sans 3", sans-serif';
+const canvases = ['c1a', 'c1b', 'c2', 'c3', 'c4', 'c5'].map($);
+function prep() {
+  const dpr = window.devicePixelRatio || 1;
+  for (const c of canvases) {
+    c.width = Math.max(1, c.clientWidth * dpr); c.height = Math.max(1, c.clientHeight * dpr);
+    c._ctx = c.getContext('2d'); c._ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+}
+// x0..x1, y0..y1 en unidades de datos; devuelve funciones de conversión
+function axes(c, o) {
+  const ctx = c._ctx, w = c.clientWidth, h = c.clientHeight;
+  const L = 58, R = 12, T = 8, B = o.xlabel ? 40 : 22;
+  const pw = w - L - R, ph = h - T - B;
+  const X = (v) => L + (v - o.x0) / (o.x1 - o.x0) * pw;
+  const Y = (v) => T + ph - (v - o.y0) / (o.y1 - o.y0) * ph;
+  ctx.clearRect(0, 0, w, h);
+  ctx.font = FONT; ctx.lineWidth = 1;
+  ctx.strokeStyle = GRID;
+  for (const t of o.yt) { ctx.beginPath(); ctx.moveTo(L, Y(t)); ctx.lineTo(L + pw, Y(t)); ctx.stroke(); }
+  ctx.strokeStyle = INK; ctx.beginPath(); ctx.moveTo(L, T); ctx.lineTo(L, T + ph); ctx.lineTo(L + pw, T + ph); ctx.stroke();
+  ctx.fillStyle = INK2;
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  for (const t of o.yt) { ctx.beginPath(); ctx.moveTo(L - 4, Y(t)); ctx.lineTo(L, Y(t)); ctx.stroke(); ctx.fillText(o.yf ? o.yf(t) : String(t), L - 7, Y(t)); }
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  for (const t of o.xt) { const x = X(t); ctx.beginPath(); ctx.moveTo(x, T + ph); ctx.lineTo(x, T + ph + 4); ctx.stroke(); ctx.fillText(o.xf ? o.xf(t) : String(t), x, T + ph + 6); }
+  if (o.xlabel) ctx.fillText(o.xlabel, L + pw / 2, T + ph + 22);
+  if (o.ylabel) { ctx.save(); ctx.translate(12, T + ph / 2); ctx.rotate(-Math.PI / 2); ctx.textBaseline = 'middle'; ctx.fillText(o.ylabel, 0, 0); ctx.restore(); }
+  return { ctx, X, Y, L, T, pw, ph, clip() { ctx.save(); ctx.beginPath(); ctx.rect(L + 1, T, pw, ph); ctx.clip(); } };
+}
+function dashed(a, x0, y0, x1, y1, color) {
+  a.ctx.save(); a.ctx.strokeStyle = color; a.ctx.setLineDash([5, 4]); a.ctx.beginPath(); a.ctx.moveTo(x0, y0); a.ctx.lineTo(x1, y1); a.ctx.stroke(); a.ctx.restore();
+}
+function label(a, text, x, y, color, align = 'right', base = 'bottom') {
+  const ctx = a.ctx; ctx.save(); ctx.font = FONT; ctx.textAlign = align; ctx.textBaseline = base;
+  ctx.lineWidth = 4; ctx.strokeStyle = '#fff'; ctx.strokeText(text, x, y); ctx.fillStyle = color; ctx.fillText(text, x, y); ctx.restore();
+}
+function empty(a, text) { label(a, text, a.L + a.pw / 2, a.T + a.ph / 2, INK3, 'center', 'middle'); }
+const ticks = (a, b, step) => { const r = []; for (let v = Math.ceil(a / step) * step; v <= b + 1e-9; v += step) r.push(+v.toFixed(6)); return r; };
+
+// traza muchas muestras por pixel: mínimo y máximo de cada columna
+function envelopeTrace(a, getV, N, start, color) {
+  const ctx = a.ctx; a.clip(); ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.beginPath();
+  for (let px = 0; px < a.pw; px++) {
+    const i0 = start + Math.floor(px * N / a.pw), i1 = Math.max(start + Math.floor((px + 1) * N / a.pw), i0 + 1);
+    let mn = Infinity, mx = -Infinity;
+    for (let i = i0; i < i1; i++) { const v = getV(i); if (v < mn) mn = v; if (v > mx) mx = v; }
+    const x = a.L + px + 0.5; ctx.moveTo(x, a.Y(mn) + 0.5); ctx.lineTo(x, a.Y(mx) - 0.5);
+  }
+  ctx.stroke(); ctx.restore();
+}
+
+function drawSignal(fw) {
+  const WIN = 3, N = Math.min(fw.n, WIN * HW.fs), start = fw.n - N;
+  const xo = { x0: -WIN, x1: 0, xt: [-3, -2, -1, 0], xf: (t) => fmt(t, 0) };
+  const a = axes($('c1a'), { ...xo, y0: 1.1, y1: 2.6, yt: [1.2, 1.5, 1.8, 2.1, 2.4], yf: (v) => fmt(v, 1), ylabel: 'v [V]' });
+  if (N < 2) { empty(a, 'apretá Reproducir'); } else {
+    envelopeTrace(a, (i) => fw.raw[i & 4095], N, start, BLUE);
+    dashed(a, a.L, a.Y(fw.dc), a.L + a.pw, a.Y(fw.dc), RED);
+    label(a, 'referencia estimada ' + fmt(fw.dc, 3) + ' V', a.L + a.pw - 4, a.Y(fw.dc) - 4, RED);
+  }
+  const b = axes($('c1b'), { ...xo, y0: -0.7, y1: 0.7, yt: [-0.6, -0.3, 0, 0.3, 0.6], yf: (v) => fmt(v, 1), ylabel: 'x [V]', xlabel: 'tiempo [s]' });
+  if (N >= 2) envelopeTrace(b, (i) => fw.raw[i & 4095] - fw.dc, N, start, BLUE);
+  $('r1').textContent = N >= 2 ? `c = ${fw.lastCount}  ·  v = ${fmt(fw.lastV, 3)} V` : '';
+}
+
+function drawEnvelope(fw) {
+  const WIN = 10, t1 = fw.t, t0 = t1 - WIN;
+  const a = axes($('c2'), { x0: -WIN, x1: 0, xt: ticks(-WIN, 0, 2), xf: (t) => fmt(t, 0), y0: 0, y1: 1.2, yt: [0, 0.3, 0.5, 1.0], yf: (v) => Math.round(v * 100) + '%', ylabel: 'a [% reposo-pico]', xlabel: 'tiempo [s]' });
+  dashed(a, a.L, a.Y(REP.up), a.L + a.pw, a.Y(REP.up), INK3);
+  dashed(a, a.L, a.Y(REP.down), a.L + a.pw, a.Y(REP.down), INK3);
+  if (fw.n < 2) return empty(a, 'apretá Reproducir');
+  const ctx = a.ctx; a.clip(); ctx.strokeStyle = BLUE; ctx.lineWidth = 1.5; ctx.beginPath(); let first = true;
+  for (const e of fw.envHist) { if (e.t < t0) continue; const x = a.X(e.t - t1), y = a.Y(Math.min(e.act, 1.2)); first ? (ctx.moveTo(x, y), first = false) : ctx.lineTo(x, y); }
+  ctx.stroke();
+  ctx.fillStyle = INK;
+  for (const rt of fw.repTimes) { if (rt < t0) continue; ctx.beginPath(); ctx.arc(a.X(rt - t1), a.Y(REP.down), 3.5, 0, 2 * Math.PI); ctx.fill(); }
+  ctx.restore();
+  label(a, 'U sub = ' + REP.up * 100 + '%', a.L + a.pw - 4, a.Y(REP.up) - 3, INK2);
+  label(a, 'U baj = ' + REP.down * 100 + '%', a.L + a.pw - 4, a.Y(REP.down) + 3, INK2, 'right', 'top');
+  $('r2').textContent = `RMS = ${fmt((fw.rmsV || 0) * 1000, 0)} mV  ·  a = ${Math.round(fw.act * 100)}%  ·  serie ${fw.serie}, ${fw.reps} repeticiones`;
+}
+
+function drawSpectrum(fw) {
+  const a = axes($('c3'), { x0: 0, x1: 450, xt: [0, 50, 100, 150, 200, 250, 300, 350, 400, 450], y0: 0, y1: 1.05, yt: [0, 0.25, 0.5, 0.75, 1], yf: (v) => fmt(v, 2), ylabel: 'P / P máx', xlabel: 'frecuencia [Hz]' });
+  if (!fw.accN) { $('r3').textContent = ''; return empty(a, 'esperando una contracción…'); }
+  const df = HW.fs / DSP.fftN, k0 = Math.ceil(DSP.fLo / df), k1 = Math.floor(DSP.fHi / df);
+  let mx = 0; for (let k = k0; k <= k1; k++) mx = Math.max(mx, fw.acc[k]);
+  const ctx = a.ctx; ctx.strokeStyle = BLUE; ctx.lineWidth = 1.5; ctx.beginPath();
+  for (let k = k0; k <= k1; k++) { const x = a.X(k * df), y = a.Y(fw.acc[k] / mx); k === k0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); }
+  ctx.stroke();
+  ctx.save(); ctx.globalAlpha = 0.12; ctx.fillStyle = BLUE; ctx.beginPath(); ctx.moveTo(a.X(k0 * df), a.Y(0));
+  for (let k = k0; k <= k1 && k * df <= fw.mdf; k++) ctx.lineTo(a.X(k * df), a.Y(fw.acc[k] / mx));
+  ctx.lineTo(a.X(fw.mdf), a.Y(0)); ctx.closePath(); ctx.fill(); ctx.restore();
+  ctx.strokeStyle = ORANGE; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(a.X(fw.mdf), a.Y(0)); ctx.lineTo(a.X(fw.mdf), a.Y(1.02)); ctx.stroke();
+  label(a, 'MDF = ' + Math.round(fw.mdf) + ' Hz', a.X(fw.mdf) + 6, a.Y(0.95), ORANGE, 'left', 'middle');
+  label(a, '50% de la potencia', a.X(fw.mdf) - 6, a.Y(0.08), BLUE, 'right', 'bottom');
+  $('r3').textContent = `MDF = ${Math.round(fw.mdf)} Hz  ·  MNF = ${Math.round(fw.mnf)} Hz  ·  ${fw.accN} bloques promediados`;
+}
+
+function drawMdf(fw) {
+  const log = fw.repLog, n = log.length, slots = Math.max(16, n + 1);
+  const a = axes($('c4'), { x0: 0.5, x1: slots + 0.5, xt: ticks(1, slots, slots > 20 ? 5 : 2), y0: 80, y1: 130, yt: [80, 90, 100, 110, 120, 130], ylabel: 'MDF [Hz]', xlabel: 'repetición' });
+  if (!n) { $('r4').textContent = ''; return empty(a, 'esperando las primeras repeticiones…'); }
+  if (fw.base) {
+    const lim = fw.base.mdf * (1 - FAT.freqDropFull);
+    dashed(a, a.L, a.Y(fw.base.mdf), a.L + a.pw, a.Y(fw.base.mdf), INK2);
+    dashed(a, a.L, a.Y(lim), a.L + a.pw, a.Y(lim), RED);
+    label(a, 'línea base ' + Math.round(fw.base.mdf) + ' Hz', a.L + a.pw - 4, a.Y(fw.base.mdf) - 3, INK2);
+    label(a, '−' + Math.round(FAT.freqDropFull * 100) + '%: fatiga máxima', a.L + a.pw - 4, a.Y(lim) + 3, RED, 'right', 'top');
+  }
+  const ctx = a.ctx; a.clip();
+  if (fw.trend && n >= FAT.trendMinReps) {
+    ctx.strokeStyle = INK; ctx.lineWidth = 1.5; ctx.beginPath();
+    ctx.moveTo(a.X(1), a.Y(fw.trend.a)); ctx.lineTo(a.X(n), a.Y(fw.trend.a + fw.trend.b * (n - 1))); ctx.stroke();
+  }
+  log.forEach((r, i) => { ctx.fillStyle = i < FAT.baseReps ? INK3 : BLUE; ctx.beginPath(); ctx.arc(a.X(i + 1), a.Y(r.mdf), 4, 0, 2 * Math.PI); ctx.fill(); });
+  ctx.restore();
+  $('r4').textContent = fw.trend && n >= FAT.trendMinReps
+    ? `β₁ = ${fmt(fw.trend.b, 2)} Hz/rep  ·  Δ = ${fmt(fw.freqDrop * 100)}%  ·  Δ* = ${fmt(fw.freqDropSure * 100)}%`
+    : n < FAT.baseReps ? 'calibrando la línea base' : `la recta cuenta desde la repetición ${FAT.trendMinReps}`;
+}
+
+function drawIndex(fw) {
+  const slots = Math.max(16, (repHist.at(-1)?.rep || 0) + 1);
+  const a = axes($('c5'), { x0: 0.5, x1: slots + 0.5, xt: ticks(1, slots, slots > 20 ? 5 : 2), y0: 0, y1: 100, yt: [0, FAT.moderate, FAT.high, 100], ylabel: 'índice I', xlabel: 'repetición' });
+  const ctx = a.ctx;
+  ctx.save(); ctx.fillStyle = 'rgba(194,94,0,0.07)'; ctx.fillRect(a.L + 1, a.Y(FAT.high), a.pw, a.Y(FAT.moderate) - a.Y(FAT.high));
+  ctx.fillStyle = 'rgba(176,42,42,0.08)'; ctx.fillRect(a.L + 1, a.Y(100), a.pw, a.Y(FAT.high) - a.Y(100)); ctx.restore();
+  label(a, 'sin fatiga', a.L + a.pw - 4, a.Y(FAT.moderate) + 3, INK3, 'right', 'top');
+  label(a, 'moderada', a.L + a.pw - 4, a.Y(FAT.high) + 3, ORANGE, 'right', 'top');
+  label(a, 'alta: frenar', a.L + a.pw - 4, a.Y(100) + 3, RED, 'right', 'top');
+  if (!repHist.length) { $('r5').textContent = ''; return empty(a, fw.base ? 'esperando la próxima repetición…' : 'calibrando la línea base…'); }
+  ctx.strokeStyle = INK; ctx.lineWidth = 1.5; ctx.beginPath();
+  repHist.forEach((h, i) => { const x = a.X(h.rep), y = a.Y(h.score); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+  ctx.stroke();
+  repHist.forEach((h) => { ctx.fillStyle = h.score >= FAT.high ? RED : h.score >= FAT.moderate ? ORANGE : BLUE; ctx.beginPath(); ctx.arc(a.X(h.rep), a.Y(h.score), 4, 0, 2 * Math.PI); ctx.fill(); });
+  $('r5').textContent = `Δ_RMS = ${fmt((fw.rmsRise || 0) * 100)}%  ·  I = ${Math.round(fw.score)}`;
+}
+
+const ESTADO = { calibrando: 'calibrando', sin: 'sin fatiga', moderada: 'fatiga moderada', alta: 'fatiga alta' };
+let lastDraw = 0;
+function draw(force) {
+  const now = performance.now(); if (!force && now - lastDraw < 40) return; lastDraw = now;
+  const fw = esp.fw, p = fw.packet();
+  drawSignal(fw); drawEnvelope(fw); drawSpectrum(fw); drawMdf(fw); drawIndex(fw);
+  $('out').textContent = `t = ${fmt(fw.t, 1)} s  ·  serie ${p.serie}  ·  ${p.reps} reps  ·  ${ESTADO[p.estado]}`;
+}
+
+window.addEventListener('resize', () => { prep(); draw(true); });
+document.fonts.ready.then(() => draw(true));
+prep();
+reset();
+</script>
+</body>
+</html>

@@ -1,56 +1,66 @@
-# Welcome to your Expo app 👋
+# Curl EMG
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Web del TP de Instrumentación (Grupo 8): un wearable de EMG para el bíceps que cuenta repeticiones y detecta fatiga muscular.
 
-## Get started
-
-1. Install dependencies
-
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```
+electrodos → INA128 (G = 50, REF = 1,85 V) → etapa final (G = 5) → ADC de la ESP32 (12 bits, 1 kHz)
+→ firmware (repeticiones y fatiga) → WiFi → Supabase Realtime → app
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Publicada en Vercel: https://curl-emg.vercel.app (cada push a `main` se despliega solo).
 
-### Other setup steps
+## Archivos
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+| Archivo | Qué es |
+|---|---|
+| `index.html` | La app: registro e inicio de sesión, perfil, plan, entrenamiento (recibe los datos de la ESP) e historial. |
+| `simulador-esp.html` | ESP virtual para probar la app sin hardware: simula la señal a nivel del ADC, la procesa con el algoritmo del firmware y le manda a la app los mismos paquetes que va a mandar la ESP. |
+| `analisis.html` | Explicación paso a paso del procesamiento de la señal, con ecuaciones y figuras en vivo. |
+| `emg-sim.js` | Simulación de la señal (`SimulatedSubject`) y algoritmo del firmware (`EmgFirmware`), con todos los parámetros al principio. Lo usan el simulador y la página de análisis; la app no. |
 
-## Learn more
+No hay build ni dependencias: son archivos estáticos.
 
-To learn more about developing your project with Expo, look at the following resources:
+## Backend (Supabase)
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+- Autenticación con email y contraseña.
+- Tablas `profiles` y `sessions` (con Row Level Security): perfil del usuario y una fila por serie guardada.
+- Los datos en vivo de la ESP no pasan por ninguna tabla: van por un canal de broadcast de Supabase Realtime.
 
-## Join the community
+## Comunicación ESP → app
 
-Join our community of developers creating universal apps.
+La ESP hace un POST HTTPS a `https://<proyecto>.supabase.co/realtime/v1/api/broadcast` con la anon key en el encabezado `apikey`:
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+```json
+{ "messages": [{ "topic": "curl-emg-G8-01", "event": "paquete",
+  "payload": { "v": 1, "seq": 42, "t": 61230, "serie": 1, "reps": 7, "estado": "sin", "fatiga": 18 } }] }
+```
+
+| Campo | Significado |
+|---|---|
+| `v` | versión del formato (1) |
+| `seq` | número de paquete, para detectar pérdidas |
+| `t` | ms desde que arrancó la ESP |
+| `serie` | serie detectada por la ESP (sube después de 8 s sin contracciones) |
+| `reps` | repeticiones de esa serie, acumuladas (si se pierde un paquete no se pierde una repetición) |
+| `estado` | `calibrando`, `sin`, `moderada` o `alta` |
+| `fatiga` | índice 0-100 (la app no lo muestra; se guarda en el historial) |
+
+La ESP manda un paquete con cada repetición o cambio de estado, y uno por segundo aunque no cambie nada. La app escucha el canal `curl-emg-<código del sensor>` (el código se carga en la pestaña Entrenar) y muestra "Sin datos del sensor" si pasan 3 s sin paquetes.
+
+## Probar en local
+
+```bash
+python3 -m http.server 8080
+```
+
+1. Abrir http://localhost:8080, iniciar sesión e ir a **Entrenar**. La tarjeta Sensor dice "Esperando al sensor".
+2. En otra pestaña (o en otra compu) abrir http://localhost:8080/simulador-esp.html con el mismo código de sensor y apretar **Encender ESP**.
+3. En la app, **Iniciar entrenamiento**: las repeticiones suben y la fatiga pasa de "Calibrando" a "Frená".
+4. En el simulador se pueden probar el descanso entre series, la pérdida de paquetes y el apagado del sensor.
+
+Dejar la pestaña del simulador visible: los navegadores frenan los temporizadores de las pestañas en segundo plano.
+
+## Pendiente
+
+- Pasar `EmgFirmware` (de `emg-sim.js`) a C++ para la ESP32 y agregar el WiFi y el POST.
+- Ajustar los umbrales con señal real. La caída de la MDF del 6% sale del dataset; la suba del RMS del 40% es una suposición del modelo.
