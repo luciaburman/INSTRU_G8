@@ -336,6 +336,16 @@ const DB = {
   async signOut() {
     await supa.auth.signOut();
   },
+  // Manda un mail con un link para restablecer la contraseña.
+  // El link vuelve a esta misma página con #...&type=recovery en la URL.
+  async sendPasswordReset(email) {
+    return await supa.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin + window.location.pathname,
+    });
+  },
+  async updatePassword(password) {
+    return await supa.auth.updateUser({ password });
+  },
   async getCurrentUser() {
     const { data } = await supa.auth.getUser();
     return data.user || null;
@@ -362,9 +372,10 @@ const DB = {
    ESTADO GLOBAL
    ========================================================= */
 const state = {
-  screen: 'landing',   // landing | auth | profile | dashboard
-  authMode: 'login',   // login | signup
+  screen: 'landing',   // landing | auth | resetPassword | profile | dashboard
+  authMode: 'login',   // login | signup | forgot
   authError: '',
+  authInfo: '',        // mensaje de éxito en la pantalla de auth (ej: "te mandamos un mail")
   user: null,
   tab: 'entrenar',      // entrenar | plan | historial
 };
@@ -374,17 +385,32 @@ async function boot() {
   // en el hash de la URL (#access_token=...&type=signup). Los detectamos
   // antes de que el cliente los "limpie" automáticamente.
   const hash = window.location.hash;
-  if (hash.includes('type=signup') || hash.includes('type=email_change') || hash.includes('type=recovery')) {
+  if (hash.includes('type=signup') || hash.includes('type=email_change')) {
     state.justVerified = true;
   }
+  // Link de "olvidé mi contraseña": entra con una sesión temporal y hay que pedir la clave nueva.
+  if (hash.includes('type=recovery')) {
+    state.recoveringPassword = true;
+  }
+  // Link vencido o ya usado: Supabase vuelve con #error=...
+  let linkError = hash.includes('error=')
+    ? (hash.includes('otp_expired') ? 'El link expiró o ya fue usado. Pedí uno nuevo.' : 'El link no es válido. Pedí uno nuevo.')
+    : '';
   // limpiamos la URL para que no quede el token visible ni se re-muestre el cartel al refrescar
-  if (state.justVerified) {
+  if (state.justVerified || state.recoveringPassword || linkError) {
     window.history.replaceState(null, '', window.location.pathname);
   }
 
   // getSession() espera a que el cliente termine de procesar la URL, a diferencia de getUser()
   const { data: { session } } = await supa.auth.getSession();
-  if (session?.user) {
+  if (state.recoveringPassword && !session?.user) {
+    state.recoveringPassword = false;
+    linkError = 'El link no es válido. Pedí uno nuevo.';
+  }
+  if (state.recoveringPassword) {
+    state.user = { id: session.user.id, email: session.user.email, profile: null };
+    state.screen = 'resetPassword';
+  } else if (session?.user) {
     const profile = await DB.getProfile(session.user.id);
     state.user = { id: session.user.id, email: session.user.email, profile: profile || null };
     state.screen = profile ? 'dashboard' : 'profile';
@@ -395,6 +421,12 @@ async function boot() {
   if (state.justVerified) {
     showVerifiedBanner();
     state.justVerified = false;
+  }
+  if (linkError) {
+    state.screen = 'auth';
+    state.authMode = 'forgot';
+    state.authError = linkError;
+    render();
   }
 }
 
@@ -700,6 +732,7 @@ function render() {
   app.innerHTML = '';
   if (state.screen === 'landing') app.appendChild(renderLanding());
   else if (state.screen === 'auth') app.appendChild(renderAuth());
+  else if (state.screen === 'resetPassword') app.appendChild(renderResetPassword());
   else if (state.screen === 'profile') app.appendChild(renderProfile());
   else if (state.screen === 'dashboard') app.appendChild(renderDashboard());
 }
@@ -753,6 +786,7 @@ function renderLanding() {
 
 /* ---------- Auth ---------- */
 function renderAuth() {
+  if (state.authMode === 'forgot') return renderForgotPassword();
   const wrap = el('div', { class: 'screen' });
   const isSignup = state.authMode === 'signup';
 
@@ -826,11 +860,129 @@ function renderAuth() {
 
   wrap.appendChild(form);
   wrap.appendChild(errorBox);
+  if (!isSignup) {
+    wrap.appendChild(el('button', {
+      class: 'btn-ghost', style: 'margin-top:8px; display:block',
+      onclick: () => { state.authMode = 'forgot'; state.authError = ''; state.authInfo = ''; render(); }
+    }, '¿Olvidaste tu contraseña?'));
+  }
   wrap.appendChild(el('button', {
-    class: 'btn-ghost', style: 'margin-top:16px',
+    class: 'btn-ghost', style: isSignup ? 'margin-top:16px' : 'margin-top:4px',
     onclick: () => { state.authMode = isSignup ? 'login' : 'signup'; state.authError=''; render(); }
   }, isSignup ? '¿Ya tenés cuenta? Iniciá sesión' : '¿No tenés cuenta? Creá una'));
 
+  return wrap;
+}
+
+/* ---------- Olvidé mi contraseña: pedir el link por mail ---------- */
+function renderForgotPassword() {
+  const wrap = el('div', { class: 'screen' });
+  const backToLogin = () => { state.authMode = 'login'; state.authError = ''; state.authInfo = ''; render(); };
+
+  wrap.appendChild(el('div', { class: 'back-row' }, [
+    el('button', { class: 'back-btn', 'aria-label': 'Volver', onclick: backToLogin, html: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>` }),
+  ]));
+  wrap.appendChild(el('h2', { class: 'page-title' }, 'Recuperar contraseña'));
+  wrap.appendChild(el('p', { class: 'page-sub' }, 'Ingresá tu email y te mandamos un link para elegir una contraseña nueva.'));
+
+  const emailInput = el('input', { type: 'email', autocomplete: 'email', placeholder: 'vos@ejemplo.com' });
+  const submitBtn = el('button', { class: 'btn-primary', type: 'submit', style: 'margin-top:6px' }, 'Enviar link');
+  const form = el('form', {}, [
+    el('div', { class: 'field' }, [el('label', {}, 'Email'), emailInput]),
+    submitBtn,
+  ]);
+
+  const errorBox = el('div', { class: 'error-text', role: 'alert', 'aria-live': 'polite' }, state.authError || '');
+  if (!state.authError) errorBox.style.display = 'none';
+  const infoBox = el('div', { class: 'profile-feedback success', role: 'status', 'aria-live': 'polite' }, state.authInfo || '');
+  if (state.authInfo) infoBox.style.display = 'block';
+
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const email = emailInput.value.trim().toLowerCase();
+    if (!email) { state.authError = 'Ingresá tu email.'; state.authInfo = ''; render(); return; }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Enviando...';
+    const { error } = await DB.sendPasswordReset(email);
+    if (error) {
+      state.authError = /rate limit|seconds/i.test(error.message || '')
+        ? 'Pediste un link hace poco. Esperá un minuto y volvé a intentar.'
+        : error.message;
+      state.authInfo = '';
+    } else {
+      // No confirmamos si el email existe o no, para no revelar qué cuentas están registradas.
+      state.authError = '';
+      state.authInfo = 'Si hay una cuenta con ese email, te llegó un link para restablecer la contraseña. Revisá también la carpeta de spam.';
+    }
+    render();
+  });
+
+  wrap.appendChild(form);
+  wrap.appendChild(errorBox);
+  wrap.appendChild(infoBox);
+  wrap.appendChild(el('button', { class: 'btn-ghost', style: 'margin-top:16px', onclick: backToLogin }, 'Volver a iniciar sesión'));
+  return wrap;
+}
+
+/* ---------- Elegir contraseña nueva (después de abrir el link del mail) ---------- */
+function renderResetPassword() {
+  const wrap = el('div', { class: 'screen' });
+
+  wrap.appendChild(el('h2', { class: 'page-title' }, 'Elegí una contraseña nueva'));
+  wrap.appendChild(el('p', { class: 'page-sub' }, `Para la cuenta ${state.user?.email || ''}.`));
+
+  const passInput = el('input', { type: 'password', autocomplete: 'new-password', placeholder: '••••••••' });
+  const confirmInput = el('input', { type: 'password', autocomplete: 'new-password', placeholder: '••••••••' });
+  const submitBtn = el('button', { class: 'btn-primary', type: 'submit', style: 'margin-top:6px' }, 'Guardar contraseña');
+  const form = el('form', {}, [
+    el('div', { class: 'field' }, [el('label', {}, 'Contraseña nueva'), passInput]),
+    el('div', { class: 'field' }, [el('label', {}, 'Repetí la contraseña'), confirmInput]),
+    submitBtn,
+  ]);
+
+  const errorBox = el('div', { class: 'error-text', role: 'alert', 'aria-live': 'polite' }, state.authError || '');
+  if (!state.authError) errorBox.style.display = 'none';
+
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const pass = passInput.value;
+    if (pass.length < 6) { state.authError = 'La contraseña tiene que tener al menos 6 caracteres.'; render(); return; }
+    if (pass !== confirmInput.value) { state.authError = 'Las contraseñas no coinciden.'; render(); return; }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Guardando...';
+    const { error } = await DB.updatePassword(pass);
+    if (error) {
+      state.authError = /different from the old/i.test(error.message || '')
+        ? 'La contraseña nueva tiene que ser distinta a la anterior.'
+        : error.message;
+      render();
+      return;
+    }
+
+    // Ya quedó logueado con la contraseña nueva: lo mandamos a su cuenta.
+    state.authError = '';
+    state.recoveringPassword = false;
+    const profile = await DB.getProfile(state.user.id);
+    state.user.profile = profile || null;
+    if (profile) state.sessions = await DB.getSessions(state.user.id);
+    state.screen = profile ? 'dashboard' : 'profile';
+    render();
+    showBanner('Contraseña actualizada');
+  });
+
+  wrap.appendChild(form);
+  wrap.appendChild(errorBox);
+  wrap.appendChild(el('button', {
+    class: 'btn-ghost', style: 'margin-top:16px',
+    onclick: async () => {
+      await DB.signOut();
+      state.user = null; state.authError = ''; state.recoveringPassword = false;
+      state.screen = 'landing';
+      render();
+    }
+  }, 'Cancelar'));
   return wrap;
 }
 
