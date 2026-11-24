@@ -736,7 +736,7 @@ async function trainingSave() {
       fecha: training.startedAt,
       reps: set.reps,
       duracion: set.duracion,
-      fatiga: set.fatiga,
+      fatiga: Math.round(Number(set.fatiga) || 0),   // la columna es integer en Supabase
     });
     if (error) {
       training.phase = 'confirming';
