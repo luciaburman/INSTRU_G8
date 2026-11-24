@@ -639,7 +639,7 @@ function onSensorPacket(p, prev) {
   if (training.phase !== 'running') return;
   training.reps += delta;
   training.estado = p.estado;
-  training.fatiga = Math.max(training.fatiga, Math.round(p.fatiga * 10) / 10);
+  training.fatiga = Math.max(training.fatiga, Math.round(p.fatiga));   // entero: la columna "fatiga" de Supabase es integer
 }
 
 function trainingStopLoops() {
