@@ -200,9 +200,6 @@
   .sensor-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
   .sensor-text { font-size: 13px; line-height: 1.5; color: var(--text-secondary); min-height: 20px; }
   .sensor-label { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
-  .sensor-code { display: flex; gap: 8px; }
-  .sensor-code input { flex: 1; min-width: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; font-family: 'IBM Plex Mono', monospace; text-transform: uppercase; }
-  .sensor-code button { width: auto; padding: 10px 14px; }
   .sensor-badge { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 500; color: var(--text-secondary); white-space: nowrap; }
   .sensor-badge::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
   .sensor-live { color: var(--text); }
@@ -217,7 +214,13 @@
   .fatigue-text { font-size: 14px; line-height: 1.5; color: var(--text-secondary); }
   .fatigue-track { height: 14px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
   .fatigue-fill { height: 100%; width: 0; border-radius: 999px; transition: width 0.6s ease, background 0.6s ease; }
+  .fatigue-leve { border-color: var(--amber); }
   .fatigue-moderada { background: var(--amber-bg); border-color: var(--amber); }
+  .fatigue-sinref { border-color: var(--red); }
+  .sensor-connect { width: auto; align-self: flex-start; padding: 10px 14px; }
+  .sensor-inline { display: flex; align-items: center; gap: 10px; }
+  .sensor-inline .sensor-connect { padding: 6px 12px; font-size: 13px; }
+  .sensor-off::before, .sensor-nosoportado::before { background: var(--text-muted); }
   .fatigue-alta { background: var(--red-bg); border-color: var(--red); border-width: 2px; }
   .fatigue-alta .fatigue-title { color: var(--red); }
   .fatigue-alta .fatigue-text { color: var(--text); font-weight: 500; }
@@ -466,72 +469,132 @@ function generarPlan(profile) {
 }
 
 /* =========================================================
-   SENSOR (ESP32)
+   SENSOR (ESP32) POR BLUETOOTH
    -----------------------------------------------------------
-   La ESP se conecta por WiFi y hace un POST HTTPS a Supabase Realtime
-   (broadcast) en el canal "curl-emg-<código del sensor>", evento "paquete".
-   La app solo escucha ese canal: no hay tablas ni RLS en el medio.
+   Todo el procesamiento (filtros, repeticiones, MDF, fatiga) lo hace la ESP.
+   La app se conecta por Web Bluetooth (Chrome o Edge, en la compu o en Android;
+   iPhone no tiene Web Bluetooth), recibe un JSON por notificación en la
+   característica FATIGA y le manda dos comandos por la característica COMANDO:
+     'I' = START: la ESP empieza una serie (relajar -> calibrar -> medir)
+     'S' = STOP:  la ESP termina la serie y deja de contar
+   Cuándo se mandan:
+     Iniciar entrenamiento / Iniciar serie N  -> 'I'
+     Terminar serie / Guardar / Descartar     -> 'S'
+     Si el sensor se conecta con una serie en curso y la ESP está esperando -> 'I'
 
-   Contrato del paquete (v1), lo que manda la ESP:
-     { v: 1, seq, t, serie, reps, estado, fatiga }
-       seq     contador de paquetes (para detectar pérdidas)
+   Paquete (v2), lo que manda la ESP cada 0,5 s y en cada repetición:
+     { v: 2, seq, t, serie, reps, estado, fatiga, mdf, ref, act, rms, cal, rep, sat }
+       seq     contador de paquetes (si salta, se perdieron paquetes)
        t       ms desde que arrancó la ESP
-       serie   número de serie que detectó la ESP (sube después de un descanso)
-       reps    repeticiones de esa serie, acumuladas: si se pierde un paquete no se pierde una repetición
-       estado  'calibrando' | 'sin' | 'moderada' | 'alta'
-       fatiga  índice 0-100 (la app no lo muestra; se guarda en el historial)
-   La ESP manda un paquete en cada repetición o cambio de estado, y uno por segundo aunque no pase nada.
+       serie   sube cada vez que se inicia una serie en la ESP (START o pulsador)
+       reps    repeticiones de esa serie, acumuladas
+       estado  'esperando' | 'relaja' | 'calibrando' | 'sin' | 'leve' | 'moderada' | 'alta' | 'sinref'
+       fatiga  caída de la MDF respecto de la referencia [%] (se guarda en el historial)
+     El resto (mdf, ref, act, rms, cal, rep, sat) es información técnica; la app no lo usa.
    ========================================================= */
-const SENSOR_TIMEOUT_MS = 3000;   // sin paquetes durante este tiempo = sensor desconectado
-const FATIGA_UMBRAL = { moderada: 30, alta: 60 };   // los mismos umbrales que usa el firmware
-const ESTADOS = ['calibrando', 'sin', 'moderada', 'alta'];
-
-function readSensorCode() {
-  try { return localStorage.getItem('curl-emg-sensor') || 'G8-01'; } catch { return 'G8-01'; }
-}
+const BLE_SENSOR = {
+  nombre: 'MyoSignals',
+  servicio: '8d1f0001-6c3a-4b8e-9a2e-3f1b2c4d5e60',
+  fatiga: '8d1f0003-6c3a-4b8e-9a2e-3f1b2c4d5e60',
+  comando: '8d1f0004-6c3a-4b8e-9a2e-3f1b2c4d5e60',
+};
+const CMD_INICIAR = 'I';
+const CMD_DETENER = 'S';
+const SENSOR_TIMEOUT_MS = 3000;   // sin paquetes durante este tiempo = sensor sin datos
+const FATIGA_UMBRAL = { leve: 7, moderada: 12, alta: 20 };   // % de caída de la MDF, igual que el firmware
+const ESTADOS = ['esperando', 'relaja', 'calibrando', 'sin', 'leve', 'moderada', 'alta', 'sinref'];
 
 const sensor = {
-  code: readSensorCode(),
-  channel: null,
-  subscribed: false,
+  device: null, char: null, cmd: null,
+  colaComandos: Promise.resolve(),   // los comandos se mandan de a uno
+  inicioPedido: false,
+  ultimoInicioMs: 0,                 // cuándo se mandó el último START
+  conectando: false, error: '',
   last: null, lastAt: 0,
   received: 0, lost: 0, invalid: 0,
   tick: null,
 
-  connect() {
-    this.disconnect();
-    this.channel = supa.channel('curl-emg-' + this.code)
-      .on('broadcast', { event: 'paquete' }, (msg) => this.receive(msg.payload))
-      .subscribe((status) => { this.subscribed = status === 'SUBSCRIBED'; refreshTrainingUi(); });
-    // una vez por segundo, para que la pantalla note si el sensor deja de mandar
-    this.tick = setInterval(refreshTrainingUi, 1000);
+  get soportado() { return !!(navigator.bluetooth && navigator.bluetooth.requestDevice); },
+
+  // Tiene que llamarse desde un click: el navegador muestra la lista de dispositivos.
+  async connect() {
+    if (!this.soportado || this.conectando) return;
+    this.conectando = true; this.error = ''; refreshTrainingUi();
+    try {
+      const nuevo = !this.device;
+      if (nuevo) {
+        this.device = await navigator.bluetooth.requestDevice({
+          filters: [{ name: BLE_SENSOR.nombre }],
+          optionalServices: [BLE_SENSOR.servicio],
+        });
+        this.device.addEventListener('gattserverdisconnected', () => this.onDesconectado());
+      }
+      const server = await this.device.gatt.connect();
+      const servicio = await server.getPrimaryService(BLE_SENSOR.servicio);
+      if (this.char) this.char.removeEventListener('characteristicvaluechanged', this.onDato);
+      this.char = await servicio.getCharacteristic(BLE_SENSOR.fatiga);
+      this.char.addEventListener('characteristicvaluechanged', this.onDato);
+      await this.char.startNotifications();
+      this.cmd = await servicio.getCharacteristic(BLE_SENSOR.comando);
+      // Si es una reconexión se conserva el último paquete: las repeticiones hechas
+      // mientras estuvo cortado se suman igual (la ESP manda el total acumulado).
+      if (nuevo) { this.last = null; this.lastAt = 0; this.received = 0; this.lost = 0; this.invalid = 0; }
+      clearInterval(this.tick);
+      this.tick = setInterval(refreshTrainingUi, 1000);   // para notar si deja de mandar
+    } catch (e) {
+      // Cerrar la lista sin elegir no es un error
+      if (e.name !== 'NotFoundError') this.error = 'No se pudo conectar: ' + e.message;
+      if (this.device && !this.device.gatt.connected) this.device = null;
+    }
+    this.conectando = false;
+    refreshTrainingUi();
   },
   disconnect() {
-    if (this.channel) supa.removeChannel(this.channel);
-    clearInterval(this.tick);
-    this.channel = null; this.subscribed = false; this.tick = null;
-    this.last = null; this.lastAt = 0; this.received = 0; this.lost = 0; this.invalid = 0;
+    if (this.device && this.device.gatt.connected) this.device.gatt.disconnect();
   },
-  setCode(code) {
-    this.code = code.trim().toUpperCase() || 'G8-01';
-    try { localStorage.setItem('curl-emg-sensor', this.code); } catch {}
-    this.connect();
+  // Manda un comando de un carácter a la ESP ('I' o 'S'). Si no hay conexión, no hace nada.
+  enviar(comando) {
+    this.colaComandos = this.colaComandos.then(async () => {
+      if (!this.cmd || !this.conectado) return;
+      try {
+        await this.cmd.writeValue(new TextEncoder().encode(comando));
+        if (comando === CMD_INICIAR) this.ultimoInicioMs = Date.now();
+      }
+      catch (e) { console.warn('No se pudo mandar el comando', comando, e); }
+    });
+    return this.colaComandos;
+  },
+  onDesconectado() {
+    clearInterval(this.tick); this.tick = null;
+    refreshTrainingUi();
+  },
+  onDato: (ev) => {
+    let p;
+    try { p = JSON.parse(new TextDecoder().decode(ev.target.value)); }
+    catch { sensor.invalid++; return; }
+    sensor.receive(p);
   },
   receive(p) {
-    const ok = p && p.v === 1 && Number.isInteger(p.seq) && Number.isInteger(p.serie) && Number.isInteger(p.reps)
+    const ok = p && p.v === 2 && Number.isInteger(p.seq) && Number.isInteger(p.serie) && Number.isInteger(p.reps)
       && p.reps >= 0 && ESTADOS.includes(p.estado) && typeof p.fatiga === 'number';
     if (!ok) { this.invalid++; return; }
-    // Un paquete viejo que llega tarde (los pedidos HTTPS pueden llegar desordenados) se descarta.
-    // Si seq vuelve muy atrás, la ESP se reinició y se acepta.
-    if (this.last && p.seq <= this.last.seq && this.last.seq - p.seq < 50) return;
     if (this.last && p.seq > this.last.seq + 1) this.lost += p.seq - this.last.seq - 1;
+    // Serie en curso en la app pero la ESP esperando (se conectó después de tocar Iniciar): START
+    // (si se mandó START hace menos de 2 s, el paquete es anterior a ese START: no se repite)
+    if (training.phase === 'running' && p.estado === 'esperando') {
+      if (!this.inicioPedido && Date.now() - this.ultimoInicioMs > 2000) { this.inicioPedido = true; this.enviar(CMD_INICIAR); }
+    } else {
+      this.inicioPedido = false;
+    }
     onSensorPacket(p, this.last);
     this.last = p; this.lastAt = Date.now(); this.received++;
     refreshTrainingUi();
   },
+  get conectado() { return !!(this.device && this.device.gatt.connected); },
   get status() {
-    if (!this.channel) return 'off';
-    if (!this.subscribed) return 'connecting';
+    if (!this.soportado) return 'nosoportado';
+    if (this.conectando) return 'connecting';
+    if (!this.conectado) return 'off';
     if (!this.last) return 'waiting';
     return Date.now() - this.lastAt > SENSOR_TIMEOUT_MS ? 'stale' : 'live';
   },
@@ -547,7 +610,7 @@ function refreshTrainingUi() { if (training.ui) training.ui.refresh(); }
    ========================================================= */
 const training = {
   phase: 'idle',
-  reps: 0, seconds: 0, setSeconds: 0, fatiga: 0, estado: 'calibrando',
+  reps: 0, seconds: 0, setSeconds: 0, fatiga: 0, estado: 'esperando',
   restSeconds: 0,
   sets: [], saveIndex: 0,
   startedAt: null,
@@ -557,7 +620,10 @@ const training = {
 };
 
 // La app no muestra el porcentaje de fatiga: solo el estado y un color de verde a rojo.
-function fatigaLabel(f) { return f >= FATIGA_UMBRAL.alta ? 'fatiga alta' : f >= FATIGA_UMBRAL.moderada ? 'fatiga moderada' : 'sin fatiga'; }
+function fatigaLabel(f) {
+  return f >= FATIGA_UMBRAL.alta ? 'fatiga alta' : f >= FATIGA_UMBRAL.moderada ? 'fatiga moderada'
+    : f >= FATIGA_UMBRAL.leve ? 'fatiga leve' : 'sin fatiga';
+}
 function fatigueColor(level) { return `hsl(${Math.round(95 - 95 * level)}, 70%, 45%)`; }   // 0 = verde, 1 = rojo
 function fmtTime(s) {
   const m = String(Math.floor(s / 60)).padStart(2, '0');
@@ -573,7 +639,7 @@ function onSensorPacket(p, prev) {
   if (training.phase !== 'running') return;
   training.reps += delta;
   training.estado = p.estado;
-  training.fatiga = Math.max(training.fatiga, Math.round(p.fatiga));
+  training.fatiga = Math.max(training.fatiga, Math.round(p.fatiga * 10) / 10);
 }
 
 function trainingStopLoops() {
@@ -593,7 +659,7 @@ function trainingStartLoops() {
 function trainingReset() {
   trainingStopLoops();
   training.phase = 'idle';
-  training.reps = 0; training.seconds = 0; training.setSeconds = 0; training.fatiga = 0; training.estado = 'calibrando';
+  training.reps = 0; training.seconds = 0; training.setSeconds = 0; training.fatiga = 0; training.estado = 'esperando';
   training.restSeconds = 0;
   training.sets = []; training.saveIndex = 0;
   training.startedAt = null;
@@ -604,7 +670,7 @@ function trainingStartSetState() {
   training.reps = 0;
   training.setSeconds = 0;
   training.fatiga = 0;
-  training.estado = sensor.last ? sensor.last.estado : 'calibrando';
+  training.estado = sensor.last ? sensor.last.estado : 'esperando';
 }
 
 function trainingStart() {
@@ -613,6 +679,7 @@ function trainingStart() {
   training.phase = 'running';
   training.startedAt = new Date().toISOString();
   trainingStartLoops();
+  sensor.enviar(CMD_INICIAR);
   render();
 }
 function trainingPause() { training.phase = 'paused'; trainingStopLoops(); render(); }
@@ -624,6 +691,7 @@ function trainingStoreCurrentSet(force = false) {
   return true;
 }
 function trainingCompleteSet() {
+  sensor.enviar(CMD_DETENER);
   trainingStoreCurrentSet(true);
   trainingStopLoops();
   training.restSeconds = 0;
@@ -639,6 +707,7 @@ function trainingStartNextSet() {
   training.restSeconds = 0;
   training.phase = 'running';
   trainingStartLoops();
+  sensor.enviar(CMD_INICIAR);
   render();
 }
 function trainingAskFinish() {
@@ -649,9 +718,10 @@ function trainingAskFinish() {
   render();
 }
 function trainingKeepGoing() { training.phase = 'running'; trainingStartLoops(); render(); }
-function trainingDiscard() { trainingReset(); render(); }
+function trainingDiscard() { sensor.enviar(CMD_DETENER); trainingReset(); render(); }
 
 async function trainingSave() {
+  sensor.enviar(CMD_DETENER);
   training.phase = 'saving';
   training.saveError = '';
   render();
@@ -1221,35 +1291,56 @@ function renderHistorialTab() {
   return el('div', { class: 'card' }, rows);
 }
 
+// Aviso al usuario cuando sube la fatiga: vibración (celular) y un pitido.
+let audioCtx = null;
+function pitido(veces) {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    for (let i = 0; i < veces; i++) {
+      const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+      const t0 = audioCtx.currentTime + i * 0.3;
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.2, t0);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.2);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(t0); osc.stop(t0 + 0.2);
+    }
+  } catch {}
+}
+function avisarFatiga(estado) {
+  const aviso = { leve: [1, [150]], moderada: [2, [200, 100, 200]], alta: [3, [400, 150, 400, 150, 400]] }[estado];
+  if (!aviso) return;
+  pitido(aviso[0]);
+  if (navigator.vibrate) navigator.vibrate(aviso[1]);
+}
+
 function renderEntrenar() {
   const isResting = training.phase === 'resting';
   const box = el('div', { class: 'training-view' + (isResting ? ' training-view-resting' : '') });
   training.ui = null;
 
-  if (!sensor.channel) sensor.connect();
   const sensorBadge = el('span', { class: 'sensor-badge' }, '');
   const sensorText = el('span', { class: 'sensor-text' }, '');
+  const connectBtn = el('button', { class: 'btn-secondary sensor-connect', onclick: () => sensor.connect() }, 'Conectar sensor');
   function refreshSensor() {
     const st = sensor.status;
     sensorBadge.className = 'sensor-badge sensor-' + st;
-    sensorBadge.textContent = { off: 'Sensor desconectado', connecting: 'Conectando…', waiting: 'Esperando al sensor', live: 'Sensor en vivo', stale: 'Sin datos del sensor' }[st];
-    sensorText.textContent = {
-      off: '', connecting: '',
-      waiting: `Encendé la ESP con el código ${sensor.code}. Cuando mande el primer dato, aparece acá.`,
-      live: `Recibiendo datos del sensor ${sensor.code}.`,
-      stale: `El sensor ${sensor.code} no manda datos hace ${Math.round((Date.now() - sensor.lastAt) / 1000)} s. Revisá que esté encendido y con WiFi.`,
+    sensorBadge.textContent = { nosoportado: 'Sin Bluetooth', off: 'Sensor desconectado', connecting: 'Conectando…', waiting: 'Esperando datos', live: 'Sensor en vivo', stale: 'Sin datos del sensor' }[st];
+    sensorText.textContent = sensor.error || {
+      nosoportado: 'Este navegador no tiene Bluetooth. Abrí la app en Chrome o Edge (compu o Android).',
+      off: sensor.device ? 'Se cortó la conexión con el sensor.' : `Prendé el sensor y tocá "Conectar sensor". Elegí "${BLE_SENSOR.nombre}" en la lista.`,
+      connecting: '',
+      waiting: 'Conectado. Esperando el primer dato del sensor…',
+      live: `Recibiendo datos de ${BLE_SENSOR.nombre}.`,
+      stale: `El sensor no manda datos hace ${Math.round((Date.now() - sensor.lastAt) / 1000)} s. Revisá que esté encendido y cerca.`,
     }[st];
+    connectBtn.hidden = !(st === 'off');
+    connectBtn.textContent = sensor.device ? 'Reconectar' : 'Conectar sensor';
   }
 
   // ---------- Antes de empezar ----------
   if (training.phase === 'idle') {
     const plan = generarPlan(state.user.profile);
-    const codeInput = el('input', { type: 'text', value: sensor.code, maxlength: '20', autocomplete: 'off', 'aria-label': 'Código del sensor' });
-    const codeForm = el('form', { class: 'sensor-code' }, [
-      codeInput,
-      el('button', { class: 'btn-secondary', type: 'submit' }, 'Conectar'),
-    ]);
-    codeForm.addEventListener('submit', (ev) => { ev.preventDefault(); sensor.setCode(codeInput.value); codeInput.value = sensor.code; refreshSensor(); });
     box.appendChild(el('div', { class: 'card training-start-card' }, [
       el('h2', { class: 'page-title', style: 'font-size:18px' }, 'Listo para entrenar'),
       el('p', { class: 'page-sub', style: 'margin-bottom:18px' },
@@ -1259,8 +1350,7 @@ function renderEntrenar() {
     box.appendChild(el('div', { class: 'card sensor-card' }, [
       el('div', { class: 'sensor-head' }, [el('strong', {}, 'Sensor'), sensorBadge]),
       sensorText,
-      el('label', { class: 'sensor-label' }, 'Código del sensor'),
-      codeForm,
+      connectBtn,
     ]));
     training.ui = { refresh: refreshSensor };
     refreshSensor();
@@ -1271,7 +1361,7 @@ function renderEntrenar() {
   const phaseLabels = { running: 'En curso', paused: 'En pausa', resting: 'Descanso', confirming: 'En pausa', saving: 'Guardando...' };
   if (!isResting) box.appendChild(el('div', { class: 'phase-row' }, [
     el('div', { class: 'phase-pill phase-' + training.phase }, phaseLabels[training.phase]),
-    sensorBadge,
+    el('div', { class: 'sensor-inline' }, [sensorBadge, connectBtn]),   // el botón aparece solo si se cortó
   ]));
 
   const plannedSets = generarPlan(state.user.profile).series;
@@ -1385,20 +1475,29 @@ function renderEntrenar() {
       restTimerValue.textContent = fmtTime(training.restSeconds);
       refreshSensor();
       const e = sensor.status === 'live' ? training.estado : 'sindatos';
-      const level = e === 'calibrando' || e === 'sindatos' ? 0 : Math.min(1, training.fatiga / FATIGA_UMBRAL.alta);
+      const midiendo = ['sin', 'leve', 'moderada', 'alta'].includes(e);
+      const level = midiendo ? Math.min(1, training.fatiga / FATIGA_UMBRAL.alta) : 0;
       fatigueFill.style.width = (level ? Math.max(6, level * 100) : 0) + '%';
       fatigueFill.style.background = fatigueColor(level);
       if (e === lastEstado) return;
-      if (e === 'alta' && lastEstado !== null && navigator.vibrate) navigator.vibrate([200, 100, 200]);
+      if (lastEstado !== null) avisarFatiga(e);
       lastEstado = e;
       fatigueCard.className = 'card signal-card fatigue-card fatigue-' + e;
-      fatigueTitle.textContent = { sindatos: 'Sin datos del sensor', calibrando: 'Calibrando', sin: 'Sin fatiga', moderada: 'La fatiga va en aumento', alta: 'Frená: detectamos fatiga' }[e];
+      fatigueTitle.textContent = {
+        sindatos: 'Sin datos del sensor', esperando: 'Iniciando…', relaja: 'Relajá el brazo',
+        calibrando: 'Calibrando', sin: 'Sin fatiga', leve: 'Fatiga leve', moderada: 'La fatiga va en aumento',
+        alta: 'Frená: detectamos fatiga', sinref: 'No se pudo calibrar',
+      }[e];
       fatigueText.textContent = {
         sindatos: 'La fatiga se va a mostrar cuando lleguen datos de la ESP.',
+        esperando: 'Arrancando la serie en el sensor…',
+        relaja: 'Dejá el brazo quieto 2 segundos: el sensor mide el reposo.',
         calibrando: 'Hacé las primeras repeticiones con normalidad: con ellas se mide tu punto de partida.',
         sin: 'Seguí a tu ritmo.',
+        leve: 'Empezás a fatigarte. Seguí cuidando la técnica.',
         moderada: 'Cuidá la técnica en las próximas repeticiones.',
         alta: `Terminá la serie ${nextSetNumber} y descansá antes de seguir.`,
+        sinref: 'Las repeticiones se siguen contando, pero sin fatiga. Revisá los electrodos, terminá la serie y empezá otra para recalibrar.',
       }[e];
     },
   };
