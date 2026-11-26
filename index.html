@@ -3,10 +3,11 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Curl EMG</title>
+<title>MyoSignals</title>
+<meta name="theme-color" content="#0E0E0E" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,600;0,700;1,800;1,900&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
   :root {
@@ -316,6 +317,114 @@
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
   }
+  /* =========================================================
+     MYOSIGNALS — estética de la marca (negro, lima, Barlow + Inter)
+     Este bloque pisa lo anterior: para volver al diseño viejo, borrarlo.
+     ========================================================= */
+  :root, :root[data-theme="dark"], :root[data-theme="light"] {
+    --bg: #0E0E0E; --surface: #161616; --surface-2: #1F1F1F; --border: #2E2E2E;
+    --text: #F4F4EF; --text-secondary: #A9A9A2; --text-muted: #6E6E68;
+    --signal: #C6F800; --signal-rgb: 198,248,0; --signal-glow: rgba(198,248,0,0.14);
+    --verde: #8FD14F;
+    --amber: #F2B705; --amber-bg: rgba(242,183,5,0.10);
+    --red: #F28C28; --red-bg: rgba(242,140,40,0.12);
+    --radius: 4px;
+    --titulo: 'Barlow Condensed', 'Arial Narrow', sans-serif;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #0E0E0E; --surface: #161616; --surface-2: #1F1F1F; --border: #2E2E2E;
+      --text: #F4F4EF; --text-secondary: #A9A9A2; --text-muted: #6E6E68;
+      --amber: #F2B705; --amber-bg: rgba(242,183,5,0.10); --red: #F28C28; --red-bg: rgba(242,140,40,0.12);
+    }
+  }
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  /* Títulos: Barlow Condensed itálica, en mayúsculas */
+  .hero-title, .page-title, .fatigue-title, .set-progress strong, .rest-copy strong {
+    font-family: var(--titulo); font-style: italic; font-weight: 900; text-transform: uppercase; letter-spacing: 0.01em;
+  }
+  .hero-title { font-size: 46px; line-height: 0.98; }
+  .page-title { font-size: 30px; line-height: 1; }
+  .fatigue-title { font-size: 32px; line-height: 1; }
+
+  /* Marca */
+  .brand-mark { width: 44px; height: 44px; border-radius: 0; background: none; }
+  .brand-mark svg { width: 44px; height: 44px; }
+  .brand-name { font-family: var(--titulo); font-style: italic; font-weight: 900; font-size: 26px; text-transform: uppercase; letter-spacing: 0.01em; }
+  .brand-name .myo { color: var(--signal); }
+
+  /* Botones */
+  .btn-primary, .btn-secondary, .controls-row button {
+    font-family: var(--titulo); font-weight: 700; font-size: 18px; letter-spacing: 0.12em; text-transform: uppercase; border-radius: var(--radius);
+  }
+  .btn-primary { background: var(--signal); color: #0E0E0E; }
+  .btn-secondary { border: 2px solid var(--border); }
+  .btn-secondary:not(:disabled):hover { border-color: var(--signal); color: var(--signal); }
+  .field input, .field select, .sensor-code input { border-radius: var(--radius); background: var(--surface); }
+  .field label, .sensor-label, .metric-label, .fatigue-label, .completed-set-heading, .rest-copy .rest-kicker {
+    font-family: var(--titulo); font-weight: 700; font-size: 15px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-secondary);
+  }
+
+  /* Pestañas: subrayado lima */
+  .tabs { background: none; border-bottom: 2px solid var(--border); border-radius: 0; padding: 0; gap: 0; }
+  .tab-btn { border-radius: 0; padding: 12px 4px; margin-bottom: -2px; border-bottom: 3px solid transparent;
+    font-family: var(--titulo); font-weight: 700; font-size: 17px; letter-spacing: 0.1em; text-transform: uppercase; }
+  .tab-btn.active { background: none; color: var(--signal); border-bottom-color: var(--signal); }
+
+  /* Tarjetas y números grandes */
+  .card, .metric { border-radius: var(--radius); }
+  .metric-value { font-family: var(--titulo); font-style: italic; font-weight: 900; font-size: 56px; color: var(--signal); }
+  .screen.wide .metric-value { font-size: 64px; }
+  .set-progress { border-left-width: 6px; border-radius: 0; background: var(--surface); }
+  .rest-progress .rest-timer { font-family: var(--titulo); font-style: italic; font-weight: 900; font-size: 128px; color: var(--signal); }
+  .phase-pill, .sensor-badge, .fatigue-badge { font-family: var(--titulo); font-weight: 700; font-size: 14px; letter-spacing: 0.12em; text-transform: uppercase; }
+  .phase-pill { border-radius: 0; }
+
+  /* Fatiga: una banda de color por nivel, como en la presentación */
+  .fatigue-card { border-width: 2px; border-left-width: 10px; }
+  .fatigue-track { height: 16px; border-radius: 0; }
+  .fatigue-fill { border-radius: 0; }
+  .fatigue-sin { border-color: var(--verde); }
+  .fatigue-sin .fatigue-title { color: var(--verde); }
+  .fatigue-leve { border-color: var(--signal); }
+  .fatigue-leve .fatigue-title { color: var(--signal); }
+  .fatigue-moderada { background: var(--amber-bg); border-color: var(--amber); }
+  .fatigue-moderada .fatigue-title { color: var(--amber); }
+  .fatigue-alta { background: var(--red-bg); border-color: var(--red); }
+  .fatigue-alta .fatigue-title { color: var(--red); }
+  .fatigue-sinref { border-color: var(--text-muted); }
+
+  .verified-banner { border-radius: var(--radius); color: #0E0E0E; font-family: var(--titulo); font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+  .status-dot, .live-dot { border-radius: 0; }
+
+  /* Formularios: ver contraseña, Bloq Mayús, ayudas */
+  .pass-wrap { position: relative; }
+  .pass-wrap input { padding-right: 52px; }
+  .pass-toggle { position: absolute; top: 50%; right: 6px; transform: translateY(-50%); width: 40px; height: 40px;
+    display: grid; place-items: center; background: none; color: var(--text-secondary); border-radius: var(--radius); }
+  .pass-toggle:hover, .pass-toggle[aria-pressed="true"] { color: var(--signal); }
+  .pass-toggle svg { width: 22px; height: 22px; }
+  .caps-warning { margin-top: 6px; font-size: 13px; color: var(--amber); }
+  .field-hint { margin-top: 6px; font-size: 13px; color: var(--text-muted); }
+  .field-hint.ok { color: var(--verde); }
+  .field-hint.mal { color: var(--red); }
+  .password-card { margin-top: 28px; }
+  .password-card .page-title { font-size: 24px; }
+
+  @media (max-width: 480px) {
+    .tab-btn { font-size: 14px; letter-spacing: 0.04em; white-space: nowrap; }
+    .metric-value { font-size: 40px; }
+    .btn-primary, .btn-secondary, .controls-row button { font-size: 16px; letter-spacing: 0.06em; }
+    .fatigue-title { font-size: 26px; }
+    .hero-title { font-size: 42px; }
+  }
+  @media (min-width: 900px) {
+    .hero-title { font-size: 76px; max-width: 13ch; }
+    .page-title { font-size: 36px; }
+  }
 </style>
 </head>
 <body>
@@ -477,10 +586,15 @@ function generarPlan(profile) {
    característica FATIGA y le manda dos comandos por la característica COMANDO:
      'I' = START: la ESP empieza una serie (relajar -> calibrar -> medir)
      'S' = STOP:  la ESP termina la serie y deja de contar
+     'N' = NUEVA SESIÓN: como 'I', pero la ESP olvida la referencia y vuelve a calibrar
+   La referencia (el músculo descansado) se calibra en la serie 1 y la ESP la usa
+   en todas las series del entrenamiento: así la serie 2 no arranca "de cero".
    Cuándo se mandan:
-     Iniciar entrenamiento / Iniciar serie N  -> 'I'
+     Iniciar entrenamiento                    -> 'N'
+     Iniciar serie N (después del descanso)   -> 'I'
      Terminar serie / Guardar / Descartar     -> 'S'
-     Si el sensor se conecta con una serie en curso y la ESP está esperando -> 'I'
+     Si el sensor se conecta con una serie en curso y la ESP está esperando ->
+       'N' si todavía no llegó el de este entrenamiento, si no 'I'
 
    Paquete (v2), lo que manda la ESP cada 0,5 s y en cada repetición:
      { v: 2, seq, t, serie, reps, estado, fatiga, mdf, ref, act, rms, cal, rep, sat }
@@ -500,8 +614,9 @@ const BLE_SENSOR = {
 };
 const CMD_INICIAR = 'I';
 const CMD_DETENER = 'S';
+const CMD_NUEVA_SESION = 'N';
 const SENSOR_TIMEOUT_MS = 3000;   // sin paquetes durante este tiempo = sensor sin datos
-const FATIGA_UMBRAL = { leve: 7, moderada: 12, alta: 20 };   // % de caída de la MDF, igual que el firmware
+const FATIGA_UMBRAL = { leve: 5, moderada: 10, alta: 13 };   // % de caída de la MDF, igual que el firmware
 const ESTADOS = ['esperando', 'relaja', 'calibrando', 'sin', 'leve', 'moderada', 'alta', 'sinref'];
 
 const sensor = {
@@ -558,7 +673,8 @@ const sensor = {
       if (!this.cmd || !this.conectado) return;
       try {
         await this.cmd.writeValue(new TextEncoder().encode(comando));
-        if (comando === CMD_INICIAR) this.ultimoInicioMs = Date.now();
+        if (comando === CMD_INICIAR || comando === CMD_NUEVA_SESION) this.ultimoInicioMs = Date.now();
+        if (comando === CMD_NUEVA_SESION) training.sesionEnviada = true;
       }
       catch (e) { console.warn('No se pudo mandar el comando', comando, e); }
     });
@@ -582,7 +698,10 @@ const sensor = {
     // Serie en curso en la app pero la ESP esperando (se conectó después de tocar Iniciar): START
     // (si se mandó START hace menos de 2 s, el paquete es anterior a ese START: no se repite)
     if (training.phase === 'running' && p.estado === 'esperando') {
-      if (!this.inicioPedido && Date.now() - this.ultimoInicioMs > 2000) { this.inicioPedido = true; this.enviar(CMD_INICIAR); }
+      if (!this.inicioPedido && Date.now() - this.ultimoInicioMs > 2000) {
+        this.inicioPedido = true;
+        this.enviar(training.sesionEnviada ? CMD_INICIAR : CMD_NUEVA_SESION);
+      }
     } else {
       this.inicioPedido = false;
     }
@@ -612,6 +731,7 @@ const training = {
   phase: 'idle',
   reps: 0, seconds: 0, setSeconds: 0, fatiga: 0, estado: 'esperando',
   restSeconds: 0,
+  sesionEnviada: false,   // la ESP ya recibió 'N' en este entrenamiento (la referencia es de esta sesión)
   sets: [], saveIndex: 0,
   startedAt: null,
   saveError: '',
@@ -624,7 +744,14 @@ function fatigaLabel(f) {
   return f >= FATIGA_UMBRAL.alta ? 'fatiga alta' : f >= FATIGA_UMBRAL.moderada ? 'fatiga moderada'
     : f >= FATIGA_UMBRAL.leve ? 'fatiga leve' : 'sin fatiga';
 }
-function fatigueColor(level) { return `hsl(${Math.round(95 - 95 * level)}, 70%, 45%)`; }   // 0 = verde, 1 = rojo
+// Colores de la marca para cada nivel (los mismos que la presentación)
+function fatigueColor(level) {
+  const f = level * FATIGA_UMBRAL.alta;   // level = fatiga / umbral de alta
+  return f >= FATIGA_UMBRAL.alta ? '#F28C28' : f >= FATIGA_UMBRAL.moderada ? '#F2B705'
+    : f >= FATIGA_UMBRAL.leve ? '#C6F800' : '#8FD14F';
+}
+// Isotipo de MyoSignals: mancuerna cuya barra es una ráfaga de EMG
+const MYO_LOGO = `<svg viewBox="0 0 120 120" aria-hidden="true"><rect x="6" y="36" width="13" height="48" rx="3" fill="#C6F800"/><rect x="21" y="45" width="7" height="30" rx="2" fill="#C6F800"/><rect x="101" y="36" width="13" height="48" rx="3" fill="#C6F800"/><rect x="92" y="45" width="7" height="30" rx="2" fill="#C6F800"/><polyline points="28,60 37,60 43,44 50,80 58,20 66,94 73,36 79,70 84,60 92,60" fill="none" stroke="#C6F800" stroke-width="7" stroke-linejoin="miter" stroke-miterlimit="10"/></svg>`;
 function fmtTime(s) {
   const m = String(Math.floor(s / 60)).padStart(2, '0');
   const ss = String(s % 60).padStart(2, '0');
@@ -661,6 +788,7 @@ function trainingReset() {
   training.phase = 'idle';
   training.reps = 0; training.seconds = 0; training.setSeconds = 0; training.fatiga = 0; training.estado = 'esperando';
   training.restSeconds = 0;
+  training.sesionEnviada = false;
   training.sets = []; training.saveIndex = 0;
   training.startedAt = null;
   training.saveError = '';
@@ -679,7 +807,7 @@ function trainingStart() {
   training.phase = 'running';
   training.startedAt = new Date().toISOString();
   trainingStartLoops();
-  sensor.enviar(CMD_INICIAR);
+  sensor.enviar(CMD_NUEVA_SESION);   // serie 1: la ESP calibra la referencia del entrenamiento
   render();
 }
 function trainingPause() { training.phase = 'paused'; trainingStopLoops(); render(); }
@@ -707,7 +835,7 @@ function trainingStartNextSet() {
   training.restSeconds = 0;
   training.phase = 'running';
   trainingStartLoops();
-  sensor.enviar(CMD_INICIAR);
+  sensor.enviar(training.sesionEnviada ? CMD_INICIAR : CMD_NUEVA_SESION);   // misma referencia que la serie 1
   render();
 }
 function trainingAskFinish() {
@@ -822,6 +950,85 @@ function el(tag, props = {}, children = []) {
   return e;
 }
 
+/* ---------- Ayudas para los formularios de cuenta ---------- */
+const PASS_MIN = 6;                 // mínimo de Supabase por defecto
+const RECUPERAR_POR_MAIL = true;    // false: oculta "¿Olvidaste tu contraseña?" (si Supabase no puede mandar mails)
+const OJO_ABIERTO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>`;
+const OJO_CERRADO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c6.4 0 10 8 10 8a17.6 17.6 0 0 1-2.16 3.19M6.6 6.6A17.4 17.4 0 0 0 2 12s3.6 8 10 8a9.7 9.7 0 0 0 5.4-1.6"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><path d="M2 2l20 20"/></svg>`;
+
+// Campo de contraseña con botón para verla y aviso de Bloq Mayús
+function campoContrasena(label, autocomplete) {
+  const input = el('input', { type: 'password', autocomplete, placeholder: '••••••••' });
+  const ojo = el('button', { type: 'button', class: 'pass-toggle', 'aria-label': 'Mostrar contraseña', 'aria-pressed': 'false', html: OJO_ABIERTO });
+  ojo.addEventListener('click', () => {
+    const ver = input.type === 'password';
+    input.type = ver ? 'text' : 'password';
+    ojo.innerHTML = ver ? OJO_CERRADO : OJO_ABIERTO;
+    ojo.setAttribute('aria-label', ver ? 'Ocultar contraseña' : 'Mostrar contraseña');
+    ojo.setAttribute('aria-pressed', String(ver));
+    input.focus();
+  });
+  const mayus = el('div', { class: 'caps-warning', role: 'status' }, 'Bloq Mayús está activado');
+  mayus.hidden = true;
+  const revisarMayus = (e) => { if (e.getModifierState) mayus.hidden = !e.getModifierState('CapsLock'); };
+  input.addEventListener('keydown', revisarMayus);
+  input.addEventListener('keyup', revisarMayus);
+  input.addEventListener('blur', () => { mayus.hidden = true; });
+  const field = el('div', { class: 'field' }, [el('label', {}, label), el('div', { class: 'pass-wrap' }, [input, ojo]), mayus]);
+  return { field, input };
+}
+
+// Contraseña nueva + repetirla, con aviso en vivo de largo y coincidencia
+function camposContrasenaNueva(label) {
+  const nueva = campoContrasena(label, 'new-password');
+  const repetida = campoContrasena('Repetí la contraseña', 'new-password');
+  const pista = el('div', { class: 'field-hint' }, `Mínimo ${PASS_MIN} caracteres.`);
+  nueva.field.appendChild(pista);
+  const pistaRepetida = el('div', { class: 'field-hint' }, '');
+  repetida.field.appendChild(pistaRepetida);
+  const revisar = () => {
+    const largo = nueva.input.value.length;
+    pista.className = 'field-hint' + (largo === 0 ? '' : largo >= PASS_MIN ? ' ok' : ' mal');
+    pista.textContent = largo === 0 || largo >= PASS_MIN ? `Mínimo ${PASS_MIN} caracteres.` : `Faltan ${PASS_MIN - largo} caracteres.`;
+    const r = repetida.input.value;
+    pistaRepetida.className = 'field-hint' + (!r ? '' : r === nueva.input.value ? ' ok' : ' mal');
+    pistaRepetida.textContent = !r ? '' : r === nueva.input.value ? 'Coinciden.' : 'No coinciden.';
+  };
+  nueva.input.addEventListener('input', revisar);
+  repetida.input.addEventListener('input', revisar);
+  const validar = () => {
+    if (nueva.input.value.length < PASS_MIN) return `La contraseña tiene que tener al menos ${PASS_MIN} caracteres.`;
+    if (nueva.input.value !== repetida.input.value) return 'Las contraseñas no coinciden.';
+    return '';
+  };
+  return { campos: [nueva.field, repetida.field], input: nueva.input, validar };
+}
+
+// Mensajes de Supabase (en inglés) -> castellano
+function traducirError(error) {
+  const m = (error && error.message) || '';
+  const tabla = [
+    [/invalid login credentials/i, 'Email o contraseña incorrectos.'],
+    [/email not confirmed/i, 'Todavía no confirmaste tu email. Revisá tu casilla y la carpeta de spam.'],
+    [/password should be at least|weak password/i, `La contraseña tiene que tener al menos ${PASS_MIN} caracteres.`],
+    [/unable to validate email|invalid email|email address .*invalid/i, 'El email no es válido.'],
+    [/rate limit|too many requests|for security purposes/i, 'Hubo demasiados intentos seguidos. Esperá un minuto y volvé a probar.'],
+    [/failed to fetch|networkerror|load failed/i, 'No hay conexión. Revisá internet y volvé a probar.'],
+    [/signups? not allowed|signup is disabled/i, 'Por ahora no se pueden crear cuentas nuevas.'],
+    [/different from the old/i, 'La contraseña nueva tiene que ser distinta a la anterior.'],
+    [/reauthenticat|nonce/i, 'Por seguridad, cerrá sesión, volvé a entrar y probá de nuevo.'],
+    [/error sending|smtp|email.*disabled/i, 'No pudimos mandar el mail en este momento. Probá más tarde.'],
+  ];
+  for (const [re, texto] of tabla) if (re.test(m)) return texto;
+  return m || 'Algo salió mal. Probá de nuevo.';
+}
+
+// Pone el foco en el primer campo vacío (sin hacer saltar la pantalla en el celular)
+function enfocarPrimerVacio(inputs) {
+  if (window.matchMedia('(pointer: coarse)').matches) return;
+  requestAnimationFrame(() => { const v = inputs.find(i => !i.value); if (v) v.focus(); });
+}
+
 /* ---------- Landing ---------- */
 function renderLanding() {
   const wrap = el('div', { class: 'screen landing' });
@@ -829,9 +1036,9 @@ function renderLanding() {
   const top = el('div', {}, [
     el('div', { class: 'brand' }, [
       el('div', { class: 'brand-mark' }, [
-        el('span', { html: `<svg viewBox="0 0 24 24" fill="none" stroke="var(--signal)" stroke-width="2"><path d="M2 12h4l2-7 4 14 2-7h8"/></svg>` })
+        el('span', { html: MYO_LOGO })
       ]),
-      el('span', { class: 'brand-name' }, 'Curl EMG'),
+      el('span', { class: 'brand-name', html: '<span class="myo">Myo</span>Signals' }),
     ]),
   ]);
 
@@ -867,22 +1074,34 @@ function renderAuth() {
   wrap.appendChild(el('h2', { class: 'page-title' }, isSignup ? 'Creá tu cuenta' : 'Iniciá sesión'));
   wrap.appendChild(el('p', { class: 'page-sub' }, isSignup ? 'Vas a poder calibrar tu perfil y guardar tu historial de entrenamiento.' : 'Ingresá con tu email y contraseña.'));
 
-  const emailInput = el('input', { type: 'email', autocomplete: 'email', placeholder: 'vos@ejemplo.com' });
-  const passInput = el('input', { type: 'password', autocomplete: isSignup ? 'new-password' : 'current-password', placeholder: '••••••••' });
+  // El email se conserva si hay un error (antes se borraba al volver a dibujar la pantalla)
+  const emailInput = el('input', { type: 'email', autocomplete: 'email', placeholder: 'vos@ejemplo.com', value: state.authEmail || '' });
+  const nueva = isSignup ? camposContrasenaNueva('Contraseña') : null;
+  const actual = isSignup ? null : campoContrasena('Contraseña', 'current-password');
+  const passInput = isSignup ? nueva.input : actual.input;
 
-  const form = el('form', {}, [
+  const form = el('form', { novalidate: 'novalidate' }, [
     el('div', { class: 'field' }, [el('label', {}, 'Email'), emailInput]),
-    el('div', { class: 'field' }, [el('label', {}, 'Contraseña'), passInput]),
+    ...(isSignup ? nueva.campos : [actual.field]),
   ]);
 
   const errorBox = el('div', { class: 'error-text', role: 'alert', 'aria-live': 'polite' }, state.authError || '');
   if (!state.authError) errorBox.style.display = 'none';
+  const infoBox = el('div', { class: 'profile-feedback success', role: 'status', 'aria-live': 'polite' }, state.authInfo || '');
+  if (state.authInfo) infoBox.style.display = 'block';
 
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const email = emailInput.value.trim().toLowerCase();
     const pass = passInput.value;
-    if (!email || !pass) { state.authError = 'Completá los dos campos.'; render(); return; }
+    state.authEmail = email;
+    state.authInfo = '';
+    if (!email || !pass) { state.authError = 'Completá el email y la contraseña.'; render(); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { state.authError = 'El email no es válido.'; render(); return; }
+    if (isSignup) {
+      const problema = nueva.validar();
+      if (problema) { state.authError = problema; render(); return; }
+    }
 
     submitBtn.disabled = true;
     submitBtn.textContent = 'Un momento...';
@@ -893,7 +1112,7 @@ function renderAuth() {
         const accountExists = error.code === 'user_already_exists' || /already (registered|exists)/i.test(error.message || '');
         state.authError = accountExists
           ? 'Ya existe una cuenta con ese email. Iniciá sesión con tu cuenta.'
-          : error.message;
+          : traducirError(error);
         render();
         return;
       }
@@ -907,16 +1126,18 @@ function renderAuth() {
         state.authError = '';
         state.authMode = 'login';
         state.screen = 'auth';
-        alert('Cuenta creada. Revisá tu email para confirmarla antes de iniciar sesión.');
+        state.authInfo = 'Cuenta creada. Revisá tu email (y la carpeta de spam) para confirmarla antes de iniciar sesión.';
         render();
         return;
       }
+      state.authEmail = ''; state.authError = '';
       state.user = { id: data.user.id, email: data.user.email, profile: null };
       state.screen = 'profile';
       render();
     } else {
       const { data, error } = await DB.signIn(email, pass);
-      if (error) { state.authError = error.message; render(); return; }
+      if (error) { state.authError = traducirError(error); render(); return; }
+      state.authEmail = ''; state.authError = '';
       const profile = await DB.getProfile(data.user.id);
       state.user = { id: data.user.id, email: data.user.email, profile };
       if (profile) state.sessions = await DB.getSessions(data.user.id);
@@ -930,15 +1151,17 @@ function renderAuth() {
 
   wrap.appendChild(form);
   wrap.appendChild(errorBox);
-  if (!isSignup) {
+  wrap.appendChild(infoBox);
+  enfocarPrimerVacio([emailInput, passInput]);
+  if (!isSignup && RECUPERAR_POR_MAIL) {
     wrap.appendChild(el('button', {
       class: 'btn-ghost', style: 'margin-top:8px; display:block',
-      onclick: () => { state.authMode = 'forgot'; state.authError = ''; state.authInfo = ''; render(); }
+      onclick: () => { state.authEmail = emailInput.value.trim(); state.authMode = 'forgot'; state.authError = ''; state.authInfo = ''; render(); }
     }, '¿Olvidaste tu contraseña?'));
   }
   wrap.appendChild(el('button', {
     class: 'btn-ghost', style: isSignup ? 'margin-top:16px' : 'margin-top:4px',
-    onclick: () => { state.authMode = isSignup ? 'login' : 'signup'; state.authError=''; render(); }
+    onclick: () => { state.authEmail = emailInput.value.trim(); state.authMode = isSignup ? 'login' : 'signup'; state.authError = ''; state.authInfo = ''; render(); }
   }, isSignup ? '¿Ya tenés cuenta? Iniciá sesión' : '¿No tenés cuenta? Creá una'));
 
   return wrap;
@@ -955,7 +1178,7 @@ function renderForgotPassword() {
   wrap.appendChild(el('h2', { class: 'page-title' }, 'Recuperar contraseña'));
   wrap.appendChild(el('p', { class: 'page-sub' }, 'Ingresá tu email y te mandamos un link para elegir una contraseña nueva.'));
 
-  const emailInput = el('input', { type: 'email', autocomplete: 'email', placeholder: 'vos@ejemplo.com' });
+  const emailInput = el('input', { type: 'email', autocomplete: 'email', placeholder: 'vos@ejemplo.com', value: state.authEmail || '' });
   const submitBtn = el('button', { class: 'btn-primary', type: 'submit', style: 'margin-top:6px' }, 'Enviar link');
   const form = el('form', {}, [
     el('div', { class: 'field' }, [el('label', {}, 'Email'), emailInput]),
@@ -970,6 +1193,7 @@ function renderForgotPassword() {
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const email = emailInput.value.trim().toLowerCase();
+    state.authEmail = email;
     if (!email) { state.authError = 'Ingresá tu email.'; state.authInfo = ''; render(); return; }
 
     submitBtn.disabled = true;
@@ -978,7 +1202,7 @@ function renderForgotPassword() {
     if (error) {
       state.authError = /rate limit|seconds/i.test(error.message || '')
         ? 'Pediste un link hace poco. Esperá un minuto y volvé a intentar.'
-        : error.message;
+        : traducirError(error);
       state.authInfo = '';
     } else {
       // No confirmamos si el email existe o no, para no revelar qué cuentas están registradas.
@@ -1002,31 +1226,24 @@ function renderResetPassword() {
   wrap.appendChild(el('h2', { class: 'page-title' }, 'Elegí una contraseña nueva'));
   wrap.appendChild(el('p', { class: 'page-sub' }, `Para la cuenta ${state.user?.email || ''}.`));
 
-  const passInput = el('input', { type: 'password', autocomplete: 'new-password', placeholder: '••••••••' });
-  const confirmInput = el('input', { type: 'password', autocomplete: 'new-password', placeholder: '••••••••' });
+  const nueva = camposContrasenaNueva('Contraseña nueva');
   const submitBtn = el('button', { class: 'btn-primary', type: 'submit', style: 'margin-top:6px' }, 'Guardar contraseña');
-  const form = el('form', {}, [
-    el('div', { class: 'field' }, [el('label', {}, 'Contraseña nueva'), passInput]),
-    el('div', { class: 'field' }, [el('label', {}, 'Repetí la contraseña'), confirmInput]),
-    submitBtn,
-  ]);
+  const form = el('form', { novalidate: 'novalidate' }, [...nueva.campos, submitBtn]);
 
   const errorBox = el('div', { class: 'error-text', role: 'alert', 'aria-live': 'polite' }, state.authError || '');
   if (!state.authError) errorBox.style.display = 'none';
 
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
-    const pass = passInput.value;
-    if (pass.length < 6) { state.authError = 'La contraseña tiene que tener al menos 6 caracteres.'; render(); return; }
-    if (pass !== confirmInput.value) { state.authError = 'Las contraseñas no coinciden.'; render(); return; }
+    const pass = nueva.input.value;
+    const problema = nueva.validar();
+    if (problema) { state.authError = problema; render(); return; }
 
     submitBtn.disabled = true;
     submitBtn.textContent = 'Guardando...';
     const { error } = await DB.updatePassword(pass);
     if (error) {
-      state.authError = /different from the old/i.test(error.message || '')
-        ? 'La contraseña nueva tiene que ser distinta a la anterior.'
-        : error.message;
+      state.authError = traducirError(error);
       render();
       return;
     }
@@ -1196,7 +1413,35 @@ function renderProfile(isEditing = false) {
 
   wrap.appendChild(form);
   if (isEditing) wrap.appendChild(feedback);
+  if (isEditing) wrap.appendChild(renderCambiarContrasena());
   return wrap;
+}
+
+// Cambiar la contraseña estando logueado: no necesita mandar ningún mail
+function renderCambiarContrasena() {
+  const nueva = camposContrasenaNueva('Contraseña nueva');
+  const aviso = el('div', { class: 'profile-feedback', role: 'status', 'aria-live': 'polite' });
+  const boton = el('button', { class: 'btn-secondary', type: 'submit', style: 'margin-top:6px' }, 'Cambiar contraseña');
+  const form = el('form', { novalidate: 'novalidate' }, [el('div', { class: 'profile-fields' }, nueva.campos), boton]);
+  const mostrar = (tipo, texto) => { aviso.className = 'profile-feedback ' + tipo; aviso.textContent = texto; aviso.style.display = 'block'; };
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const problema = nueva.validar();
+    if (problema) { mostrar('error', problema); return; }
+    boton.disabled = true; boton.textContent = 'Guardando...';
+    const { error } = await DB.updatePassword(nueva.input.value);
+    boton.disabled = false; boton.textContent = 'Cambiar contraseña';
+    if (error) { mostrar('error', traducirError(error)); return; }
+    form.reset();
+    nueva.input.dispatchEvent(new Event('input'));
+    mostrar('success', 'Contraseña actualizada.');
+  });
+  return el('div', { class: 'card password-card' }, [
+    el('h3', { class: 'page-title' }, 'Contraseña'),
+    el('p', { class: 'page-sub' }, 'Elegí una contraseña nueva para tu cuenta.'),
+    form,
+    aviso,
+  ]);
 }
 
 /* ---------- Dashboard ---------- */
