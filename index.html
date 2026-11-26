@@ -617,7 +617,7 @@ const CMD_DETENER = 'S';
 const CMD_NUEVA_SESION = 'N';
 const SENSOR_TIMEOUT_MS = 3000;   // sin paquetes durante este tiempo = sensor sin datos
 const FATIGA_UMBRAL = { leve: 5, moderada: 10, alta: 13 };   // % de caída de la MDF, igual que el firmware
-const ESTADOS = ['esperando', 'relaja', 'calibrando', 'sin', 'leve', 'moderada', 'alta', 'sinref'];
+const ESTADOS = ['esperando', 'relaja', 'iniciando', 'sin', 'leve', 'moderada', 'alta', 'sinref'];
 
 const sensor = {
   device: null, char: null, cmd: null,
@@ -1730,14 +1730,14 @@ function renderEntrenar() {
       fatigueCard.className = 'card signal-card fatigue-card fatigue-' + e;
       fatigueTitle.textContent = {
         sindatos: 'Sin datos del sensor', esperando: 'Iniciando…', relaja: 'Relajá el brazo',
-        calibrando: 'Calibrando', sin: 'Sin fatiga', leve: 'Fatiga leve', moderada: 'La fatiga va en aumento',
+        inicia: 'iniciando', sin: 'Sin fatiga', leve: 'Fatiga leve', moderada: 'La fatiga va en aumento',
         alta: 'Frená: detectamos fatiga', sinref: 'No se pudo calibrar',
       }[e];
       fatigueText.textContent = {
         sindatos: 'La fatiga se va a mostrar cuando lleguen datos de la ESP.',
         esperando: 'Arrancando la serie en el sensor…',
         relaja: 'Dejá el brazo quieto 2 segundos: el sensor mide el reposo.',
-        calibrando: 'Hacé las primeras repeticiones con normalidad: con ellas se mide tu punto de partida.',
+        inicia: 'Iniciando la serie.',
         sin: 'Seguí a tu ritmo.',
         leve: 'Empezás a fatigarte. Seguí cuidando la técnica.',
         moderada: 'Cuidá la técnica en las próximas repeticiones.',
