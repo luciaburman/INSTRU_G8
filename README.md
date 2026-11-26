@@ -24,6 +24,11 @@ No hay build ni dependencias: son archivos estáticos.
 
 - Autenticación con email y contraseña.
 - Tablas `profiles` y `sessions` (con Row Level Security): perfil del usuario y una fila por serie guardada.
+- La tabla `sessions` debe incluir `peso_kg` para guardar el peso de trabajo. Si la tabla ya existe, ejecutá una vez:
+
+  ```sql
+  ALTER TABLE public.sessions ADD COLUMN IF NOT EXISTS peso_kg numeric;
+  ```
 - Los datos en vivo de la ESP no pasan por ninguna tabla: van por un canal de broadcast de Supabase Realtime.
 
 ## Comunicación ESP → app
@@ -55,7 +60,7 @@ python3 -m http.server 8080
 
 1. Abrir http://localhost:8080, iniciar sesión e ir a **Entrenar**. La tarjeta Sensor dice "Esperando al sensor".
 2. En otra pestaña (o en otra compu) abrir http://localhost:8080/simulador-esp.html con el mismo código de sensor y apretar **Encender ESP**.
-3. En la app, **Iniciar entrenamiento**: las repeticiones suben y la fatiga pasa de "Calibrando" a "Frená".
+3. En la app, ingresá el peso de trabajo en kg y apretá **Iniciar entrenamiento**: las repeticiones suben y la fatiga pasa de "INICIA" a "Frená".
 4. En el simulador se pueden probar el descanso entre series, la pérdida de paquetes y el apagado del sensor.
 
 Dejar la pestaña del simulador visible: los navegadores frenan los temporizadores de las pestañas en segundo plano.

@@ -730,6 +730,7 @@ function refreshTrainingUi() { if (training.ui) training.ui.refresh(); }
 const training = {
   phase: 'idle',
   reps: 0, seconds: 0, setSeconds: 0, fatiga: 0, estado: 'esperando',
+  pesoKg: null,
   restSeconds: 0,
   sesionEnviada: false,   // la ESP ya recibió 'N' en este entrenamiento (la referencia es de esta sesión)
   sets: [], saveIndex: 0,
@@ -787,6 +788,7 @@ function trainingReset() {
   trainingStopLoops();
   training.phase = 'idle';
   training.reps = 0; training.seconds = 0; training.setSeconds = 0; training.fatiga = 0; training.estado = 'esperando';
+  training.pesoKg = null;
   training.restSeconds = 0;
   training.sesionEnviada = false;
   training.sets = []; training.saveIndex = 0;
@@ -801,8 +803,12 @@ function trainingStartSetState() {
   training.estado = sensor.last ? sensor.last.estado : 'esperando';
 }
 
-function trainingStart() {
+function trainingStart(weightInput) {
+  if (!weightInput.checkValidity()) { weightInput.reportValidity(); return; }
+  const pesoKg = weightInput.valueAsNumber;
+  if (!Number.isFinite(pesoKg) || pesoKg < 0) { weightInput.reportValidity(); return; }
   trainingReset();
+  training.pesoKg = pesoKg;
   trainingStartSetState();
   training.phase = 'running';
   training.startedAt = new Date().toISOString();
@@ -865,6 +871,7 @@ async function trainingSave() {
       reps: set.reps,
       duracion: set.duracion,
       fatiga: Math.round(Number(set.fatiga) || 0),   // la columna es integer en Supabase
+      peso_kg: training.pesoKg,
     });
     if (error) {
       training.phase = 'confirming';
@@ -1513,19 +1520,21 @@ function renderHistorialTab() {
   const rows = Array.from(groups.entries()).map(([fecha, sets]) => {
     const totalReps = sets.reduce((total, set) => total + (Number(set.reps) || 0), 0);
     const dateLabel = new Date(fecha).toLocaleString('es-AR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+    const pesoKg = sets[0].peso_kg;
+    const pesoLabel = pesoKg == null || !Number.isFinite(Number(pesoKg)) ? '' : ` · ${Number(pesoKg)} kg`;
     if (sets.length === 1) {
       const set = sets[0];
       return el('div', { class: 'session-group' }, [
         el('div', { class: 'session-group-heading' }, [
           el('span', { class: 'session-date' }, dateLabel),
-          el('span', { class: 'session-stats mono' }, `${totalReps} reps · ${set.duracion} · ${fatigaLabel(set.fatiga)}`),
+          el('span', { class: 'session-stats mono' }, `${totalReps} reps · ${set.duracion} · ${fatigaLabel(set.fatiga)}${pesoLabel}`),
         ]),
       ]);
     }
     return el('div', { class: 'session-group' }, [
       el('div', { class: 'session-group-heading' }, [
         el('span', { class: 'session-date' }, dateLabel),
-        el('span', { class: 'session-stats mono' }, `${sets.length} ${sets.length === 1 ? 'serie' : 'series'} · ${totalReps} reps`),
+        el('span', { class: 'session-stats mono' }, `${sets.length} ${sets.length === 1 ? 'serie' : 'series'} · ${totalReps} reps${pesoLabel}`),
       ]),
       ...sets.map((set, index) => el('div', { class: 'session-set-row' }, [
         el('span', {}, `Serie ${index + 1}`),
@@ -1586,11 +1595,19 @@ function renderEntrenar() {
   // ---------- Antes de empezar ----------
   if (training.phase === 'idle') {
     const plan = generarPlan(state.user.profile);
+    const weightInput = el('input', {
+      type: 'number', min: '0', step: '0.5', required: 'required',
+      id: 'peso-trabajo', placeholder: 'Ej.: 10', inputmode: 'decimal',
+    });
     box.appendChild(el('div', { class: 'card training-start-card' }, [
       el('h2', { class: 'page-title', style: 'font-size:18px' }, 'Listo para entrenar'),
       el('p', { class: 'page-sub', style: 'margin-bottom:18px' },
         `Tu plan: ${plan.series} series de ${plan.repeticiones} repeticiones, con ${plan.descanso} de descanso.`),
-      el('button', { class: 'btn-primary', onclick: trainingStart }, 'Iniciar entrenamiento'),
+      el('div', { class: 'field' }, [
+        el('label', { for: 'peso-trabajo' }, 'Peso de trabajo (kg)'),
+        weightInput,
+      ]),
+      el('button', { class: 'btn-primary', onclick: () => trainingStart(weightInput) }, 'Iniciar entrenamiento'),
     ]));
     box.appendChild(el('div', { class: 'card sensor-card' }, [
       el('div', { class: 'sensor-head' }, [el('strong', {}, 'Sensor'), sensorBadge]),
@@ -1730,7 +1747,7 @@ function renderEntrenar() {
       fatigueCard.className = 'card signal-card fatigue-card fatigue-' + e;
       fatigueTitle.textContent = {
         sindatos: 'Sin datos del sensor', esperando: 'Iniciando…', relaja: 'Relajá el brazo',
-        inicia: 'iniciando', sin: 'Sin fatiga', leve: 'Fatiga leve', moderada: 'La fatiga va en aumento',
+        inicia: 'INICIA', sin: 'Sin fatiga', leve: 'Fatiga leve', moderada: 'La fatiga va en aumento',
         alta: 'Frená: detectamos fatiga', sinref: 'No se pudo calibrar',
       }[e];
       fatigueText.textContent = {
